@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaxiPro - Central de Despacho</title>
+    <link rel="stylesheet" href="dispatch/css/dispatch-v2.css">
+    <link rel="stylesheet" href="dispatch/css/dispatch-v2-modal.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCN3M2CUT2BsIwiLrXTqMqLESyTdmPhBog&libraries=places"
+        async defer></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Top Header -->
+        <header class="top-header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
+                        <rect width="40" height="40" rx="8" fill="#FFD700" />
+                        <path d="M10 20L20 10L30 20L20 30L10 20Z" fill="#000" />
+                    </svg>
+                    <h1>TaxiPro</h1>
+                </div>
+                <nav class="main-nav">
+                    <button class="nav-btn active">
+                        <i data-lucide="clipboard-list"></i>
+                        <span>Despacho</span>
+                    </button>
+                    <button class="nav-btn">
+                        <i data-lucide="bar-chart-3"></i>
+                        <span>Reportes</span>
+                    </button>
+                    <button class="nav-btn">
+                        <i data-lucide="settings"></i>
+                        <span>Config</span>
+                    </button>
+                </nav>
+            </div>
+            <div class="header-right">
+                <div class="time-display" id="currentTime">--:--</div>
+                <div class="status-badge" id="connectionStatus">
+                    <div class="status-dot"></div>
+                    <span>Conectado</span>
+                </div>
+                <div class="user-info">
+                    <span id="dispatcherName">Operador</span>
+                    <div class="user-avatar">OP</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Layout -->
+        <div class="main-layout">
+            <!-- Left Sidebar - New Job Form -->
+            <aside class="left-sidebar">
+                <div class="sidebar-header">
+                    <h2>
+                        <i data-lucide="phone-call"></i>
+                        Nueva Carrera
+                    </h2>
+                    <span class="job-counter" id="pendingCounter">0 pendientes</span>
+                </div>
+
+                <form id="newJobForm" class="job-form">
+                    <div class="form-section">
+                        <label>
+                            <i data-lucide="user"></i>
+                            Cliente
+                        </label>
+                        <div class="input-group">
+                            <input type="text" id="customerName" placeholder="Nombre del cliente" required>
+                            <input type="tel" id="customerPhone" placeholder="Teléfono" required>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <label>
+                            <i data-lucide="map-pin"></i>
+                            Punto de Recogida
+                        </label>
+                        <input type="text" id="pickupAddress" class="address-input" placeholder="Ingrese dirección..."
+                            required>
+                        <div id="pickupSuggestions" class="suggestions hidden"></div>
+                    </div>
+
+                    <div class="form-section">
+                        <label>
+                            <i data-lucide="flag"></i>
+                            Destino
+                        </label>
+                        <input type="text" id="destinationAddress" class="address-input"
+                            placeholder="Ingrese dirección..." required>
+                        <div id="destinationSuggestions" class="suggestions hidden"></div>
+                    </div>
+
+                    <div class="form-section">
+                        <label>
+                            <i data-lucide="file-text"></i>
+                            Notas
+                        </label>
+                        <textarea id="notes" placeholder="Información adicional..." rows="2"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn-create-job">
+                        <span>Crear Carrera</span>
+                        <i data-lucide="arrow-right"></i>
+                    </button>
+                </form>
+
+                <!-- Available Drivers -->
+                <div class="drivers-section">
+                    <h3>
+                        <i data-lucide="car"></i>
+                        Taxistas Disponibles (<span id="availableCount">0</span>)
+                    </h3>
+                    <div id="driversList" class="drivers-list">
+                        <p class="empty-msg">No hay taxistas conectados</p>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center - Map -->
+            <main class="map-container">
+                <div id="map" class="google-map"></div>
+
+                <!-- Map Controls -->
+                <div class="map-controls">
+                    <button class="map-btn" id="centerMap" title="Centrar mapa">
+                        <i data-lucide="locate-fixed"></i>
+                    </button>
+                    <button class="map-btn" id="toggleTraffic" title="Tráfico">
+                        <i data-lucide="traffic-cone"></i>
+                    </button>
+                </div>
+
+                <!-- Map Stats -->
+                <div class="map-stats">
+                    <div class="stat-item">
+                        <span class="stat-icon"><i data-lucide="car"></i></span>
+                        <span class="stat-value" id="totalDrivers">0</span>
+                        <span class="stat-label">Taxistas</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-icon"><i data-lucide="clock"></i></span>
+                        <span class="stat-value" id="pendingRides">0</span>
+                        <span class="stat-label">Pendientes</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-icon"><i data-lucide="navigation"></i></span>
+                        <span class="stat-value" id="activeRides">0</span>
+                        <span class="stat-label">En Curso</span>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Right Sidebar - Jobs List -->
+            <aside class="right-sidebar">
+                <div class="sidebar-header">
+                    <h2>Carreras</h2>
+                    <div class="tabs">
+                        <button class="tab active" data-tab="active">Activas</button>
+                        <button class="tab" data-tab="history">Historial</button>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="filters">
+                    <button class="filter-chip active" data-filter="all">
+                        <span>Todas</span>
+                        <span class="chip-count" id="countAll">0</span>
+                    </button>
+                    <button class="filter-chip" data-filter="pending">
+                        <span>Pendiente</span>
+                        <span class="chip-count" id="countPending">0</span>
+                    </button>
+                    <button class="filter-chip" data-filter="accepted">
+                        <span>Aceptada</span>
+                        <span class="chip-count" id="countAccepted">0</span>
+                    </button>
+                    <button class="filter-chip" data-filter="in_progress">
+                        <span>En Curso</span>
+                        <span class="chip-count" id="countInProgress">0</span>
+                    </button>
+                </div>
+
+                <!-- Jobs List -->
+                <div id="jobsList" class="jobs-list">
+                    <div class="empty-state">
+                        <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                        <p>No hay carreras activas</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- Driver Verification Modal -->
+    <div id="driverVerificationModal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i data-lucide="shield-check"></i> Verificar Conductor</h3>
+                <button class="btn-icon close-modal"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" id="verificationDetails">
+                <!-- Dynamic Content -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel reject-driver">Rechazar</button>
+                <button class="btn-create approve-driver">Aprobar Conductor</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Audio -->
+    <audio id="notificationSound" src="dispatch/sounds/notification.mp3"></audio>
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script type="module" src="dispatch/js/dispatch-v2.js"></script>
+    <script>
+        // Initialize Lucide icons after page load
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        });
+    </script>
+</body>
+
+</html>

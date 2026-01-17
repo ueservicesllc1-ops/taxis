@@ -1,0 +1,28 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Carpeta de licencias de conductores
+    match /drivers/{driverId}/license/{fileName} {
+      // Solo el driver puede subir su propia licencia
+      allow write: if request.auth != null && request.auth.uid == driverId;
+      
+      // Admins y el propio driver pueden leer
+      allow read: if request.auth != null && 
+                    (request.auth.uid == driverId || 
+                     request.auth.token.role == 'admin');
+    }
+    
+    // Fotos de perfil de conductores
+    match /drivers/{driverId}/profile/{fileName} {
+      allow write: if request.auth != null && request.auth.uid == driverId;
+      allow read: if request.auth != null;
+    }
+    
+    // Otros archivos del sistema (solo admins)
+    match /{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.token.role == 'admin';
+    }
+  }
+}

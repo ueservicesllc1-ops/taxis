@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============================================
+    // TAXIPRO - Reglas de Seguridad
+    // ============================================
+    
+    // Función helper para verificar autenticación
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Función helper para verificar si es admin
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.role == 'admin';
+    }
+    
+    // Función helper para verificar ownership
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // -------------------------------------------
+    // Colección: Conductores (drivers)
+    // -------------------------------------------
+    match /drivers/{driverId} {
+      // Crear: Solo el propio usuario autenticado
+      allow create: if isAuthenticated() && isOwner(driverId);
+      
+      // Leer: Usuarios autenticados (para que dispatch vea todos los drivers)
+      // En producción, considera restringir 'list' solo a admins
+      allow read: if isAuthenticated();
+      
+      // Actualizar: El propio driver o un admin
+      allow update: if isOwner(driverId) || isAdmin();
+      
+      // Eliminar: Solo admins
+      allow delete: if isAdmin();
+    }
+    
+    // -------------------------------------------
+    // Colección: Carreras (rides)
+    // -------------------------------------------
+    match /rides/{rideId} {
+      // Crear: Usuarios autenticados (dispatchers)
+      allow create: if isAuthenticated();
+      
+      // Leer: Usuarios autenticados
+      allow read: if isAuthenticated();
+      
+      // Actualizar: Usuarios autenticados (drivers aceptan/completan)
+      allow update: if isAuthenticated();
+      
+      // Eliminar: Solo admins
+      allow delete: if isAdmin();
+    }
+    
+    // -------------------------------------------
+    // Colección: Configuración del sistema
+    // -------------------------------------------
+    match /settings/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    
+    // -------------------------------------------
+    // Colección: Analytics/Estadísticas
+    // -------------------------------------------
+    match /analytics/{reportId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    
+    // -------------------------------------------
+    // DENEGAR TODO LO DEMÁS POR DEFECTO
+    // -------------------------------------------
+    // Cualquier otra colección está bloqueada por defecto
+  }
+}

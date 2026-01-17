@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Central de Despacho - TaxiPro</title>
+    <link rel="stylesheet" href="dispatch/css/dispatch.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+                        <rect width="40" height="40" rx="8" fill="#FFD700" />
+                        <path d="M10 20L20 10L30 20L20 30L10 20Z" fill="#000" />
+                    </svg>
+                    <h1>TaxiPro Despacho</h1>
+                </div>
+                <div class="header-info">
+                    <span class="dispatcher-name" id="dispatcherName">Operador</span>
+                    <span class="status-badge" id="connectionStatus">Desconectado</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Panel izquierdo - Nueva Carrera -->
+            <aside class="sidebar">
+                <div class="card">
+                    <h2>📞 Nueva Carrera</h2>
+                    <form id="newRideForm">
+                        <div class="form-group">
+                            <label for="customerName">Nombre del Cliente</label>
+                            <input type="text" id="customerName" placeholder="Ej: Juan Pérez" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="customerPhone">Teléfono</label>
+                            <input type="tel" id="customerPhone" placeholder="Ej: 555-1234" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="pickupAddress">📍 Origen</label>
+                            <input type="text" id="pickupAddress" placeholder="Dirección de recogida" required>
+                            <div id="pickupSuggestions" class="suggestions"></div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="destinationAddress">🎯 Destino</label>
+                            <input type="text" id="destinationAddress" placeholder="Dirección de destino" required>
+                            <div id="destinationSuggestions" class="suggestions"></div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="notes">Notas (Opcional)</label>
+                            <textarea id="notes" placeholder="Información adicional..." rows="2"></textarea>
+                        </div>
+
+                        <button type="submit" class="btn-primary">
+                            <span>Lanzar Carrera</span>
+                            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Taxistas Disponibles -->
+                <div class="card mt-4">
+                    <h3>🚖 Taxistas Disponibles</h3>
+                    <div id="availableDrivers" class="drivers-list">
+                        <p class="empty-state">No hay taxistas conectados</p>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Panel central - Carreras Activas -->
+            <main class="main-panel">
+                <div class="panel-header">
+                    <h2>Carreras Activas</h2>
+                    <div class="filters">
+                        <button class="filter-btn active" data-filter="all">Todas</button>
+                        <button class="filter-btn" data-filter="pending">Pendientes</button>
+                        <button class="filter-btn" data-filter="accepted">Aceptadas</button>
+                        <button class="filter-btn" data-filter="in_progress">En Curso</button>
+                    </div>
+                </div>
+
+                <div id="ridesList" class="rides-grid">
+                    <div class="empty-state-large">
+                        <svg width="80" height="80" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                        <p>No hay carreras activas</p>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Panel derecho - Mapa (placeholder) -->
+            <aside class="map-panel">
+                <div id="map"></div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- Audio para notificaciones -->
+    <audio id="notificationSound" src="dispatch/sounds/notification.mp3"></audio>
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="dispatch/js/dispatch.js"></script>
+</body>
+
+</html>

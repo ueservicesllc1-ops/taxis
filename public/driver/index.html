@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>TaxiPro Driver</title>
+    <link rel="stylesheet" href="/driver/css/driver.css">
+    <link rel="stylesheet" href="/driver/css/driver-auth.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCN3M2CUT2BsIwiLrXTqMqLESyTdmPhBog&libraries=places"
+        async defer></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="status-indicator" id="statusIndicator">
+                    <div class="status-dot"></div>
+                    <span id="statusText">Desconectado</span>
+                </div>
+                <button class="toggle-availability" id="toggleAvailability">
+                    <i data-lucide="power"></i>
+                    <span id="availabilityText">Desconectado</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Login Screen -->
+        <div class="screen" id="loginScreen">
+            <div class="login-container">
+                <div class="logo-large">
+                    <svg width="100" height="100" viewBox="0 0 100 100" fill="none">
+                        <rect width="100" height="100" rx="20" fill="#FFD700" />
+                        <path d="M25 50L50 25L75 50L50 75L25 50Z" fill="#000" />
+                    </svg>
+                </div>
+                <h1>TaxiPro Driver</h1>
+                <p class="subtitle">Bienvenido, socio conductor</p>
+
+                <!-- Initial Login View -->
+                <div id="loginActions">
+                    <button id="googleLoginBtn" class="google-btn">
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+                        <span>Continuar con Google</span>
+                    </button>
+                </div>
+
+                <!-- Registration Form (Hidden initially) -->
+                <form id="registrationForm" class="login-form hidden">
+                    <h3 style="margin-bottom: 1.5rem; color: var(--text-primary);">Completa tu Registro</h3>
+
+                    <div class="form-section">
+                        <h4>Datos Personales</h4>
+                        <div class="form-group">
+                            <label>Nombre Completo</label>
+                            <input type="text" id="regName" required readonly style="background: #f3f4f6;">
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="regEmail" required readonly style="background: #f3f4f6;">
+                        </div>
+                        <div class="form-group">
+                            <label>Teléfono</label>
+                            <input type="tel" id="regPhone" placeholder="Ej: +52 55 1234 5678" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Dirección</label>
+                            <input type="text" id="regAddress" placeholder="Tu dirección completa" required>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h4>Datos del Vehículo</h4>
+                        <div class="two-col">
+                            <div class="form-group">
+                                <label>Marca</label>
+                                <select id="regBrand" required class="form-select">
+                                    <option value="">Selecciona Marca</option>
+                                    <!-- Llenado dinámicamente -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Modelo</label>
+                                <select id="regModel" required disabled class="form-select">
+                                    <option value="">Selecciona Marca primero</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="two-col">
+                            <div class="form-group">
+                                <label>Año</label>
+                                <select id="regYear" required class="form-select">
+                                    <option value="">Selecciona Año</option>
+                                    <!-- Llenado dinámicamente 2015-2026 -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Color</label>
+                                <select id="regColor" required class="form-select">
+                                    <option value="">Selecciona Color</option>
+                                    <option value="Blanco">Blanco</option>
+                                    <option value="Negro">Negro</option>
+                                    <option value="Rojo">Rojo</option>
+                                    <option value="Azul">Azul</option>
+                                    <option value="Verde">Verde</option>
+                                    <option value="Café">Café</option>
+                                    <option value="Amarillo">Amarillo</option>
+                                    <option value="Celeste">Celeste</option>
+                                    <option value="Gris">Gris</option>
+                                    <option value="Plata">Plata</option>
+                                    <option value="Rosa">Rosa</option>
+                                    <option value="Dorado">Dorado</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Placa</label>
+                            <input type="text" id="regPlate" placeholder="ABC-123" required>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h4>Documentación</h4>
+                        <div class="form-group">
+                            <label>Licencia de Conducir (Foto)</label>
+                            <div class="file-upload" id="licenseUpload">
+                                <i data-lucide="upload-cloud"></i>
+                                <span>Toca para subir foto</span>
+                                <input type="file" id="regLicense" accept="image/*" required>
+                            </div>
+                            <div id="licensePreview" class="hidden">
+                                <img src="" alt="Vista previa">
+                                <button type="button" class="btn-remove-file"><i data-lucide="x"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-primary btn-large">
+                        Enviar Solicitud
+                    </button>
+                </form>
+
+                <!-- Pending Approval View -->
+                <div id="pendingView" class="hidden text-center">
+                    <div class="status-icon pending">
+                        <i data-lucide="clock" style="width: 48px; height: 48px; color: #f59e0b;"></i>
+                    </div>
+                    <h2>Solicitud en Revisión</h2>
+                    <p>Tus documentos están siendo verificados por el equipo de administración. Te notificaremos cuando
+                        tu cuenta esté activa.</p>
+                    <button id="checkStatusBtn" class="btn-secondary btn-outline" style="margin-top: 1rem;">
+                        Actualizar Estado
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Screen -->
+        <div class="screen hidden" id="mainScreen">
+            <!-- Driver Info Card -->
+            <div class="driver-card">
+                <div class="driver-avatar-large" id="driverAvatarLarge">CR</div>
+                <h2 id="welcomeName">Carlos Rodríguez</h2>
+                <p id="vehicleInfo">Toyota Corolla - ABC-123</p>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="todayRides">0</div>
+                    <div class="stat-label">Carreras Hoy</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="todayEarnings">$0</div>
+                    <div class="stat-label">Ganancias Hoy</div>
+                </div>
+            </div>
+
+            <!-- Available Rides -->
+            <div class="section">
+                <h3 class="section-title">
+                    <i data-lucide="bell"></i>
+                    Carreras Disponibles
+                </h3>
+                <div id="availableRides" class="rides-container">
+                    <div class="empty-state">
+                        <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p>Esperando carreras...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Ride -->
+            <div class="section hidden" id="currentRideSection">
+                <h3 class="section-title">
+                    <i data-lucide="car"></i>
+                    Carrera Actual
+                </h3>
+                <div id="currentRideCard"></div>
+            </div>
+        </div>
+
+        <!-- Notification Toast -->
+        <div class="toast hidden" id="toast">
+            <div class="toast-content">
+                <span class="toast-icon"><i data-lucide="bell"></i></span>
+                <div class="toast-text">
+                    <div class="toast-title">Nueva Carrera</div>
+                    <div class="toast-message">Tienes una nueva solicitud</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio -->
+    <audio id="rideNotification" src="/driver/sounds/ride-notification.mp3"></audio>
+    <audio id="rideAccepted" src="/driver/sounds/ride-accepted.mp3"></audio>
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script type="module" src="/driver/js/driver.js"></script>
+    <script>
+        // Initialize Lucide icons after page load
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,35 @@
+{
+  "name": "taxi-dispatch-platform",
+  "version": "1.0.0",
+  "description": "Plataforma de despacho de taxis con web apps para base y taxistas",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js"
+  },
+  "keywords": [
+    "taxi",
+    "dispatch",
+    "uber",
+    "real-time"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "firebase": "^12.7.0",
+    "socket.io": "^4.6.1",
+    "uuid": "^9.0.0",
+    "dotenv": "^16.3.1",
+    "helmet": "^7.1.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "winston": "^3.11.0",
+    "winston-daily-rotate-file": "^4.7.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

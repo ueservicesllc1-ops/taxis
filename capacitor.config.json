@@ -1,0 +1,8 @@
+{
+  "appId": "com.taxipro.driver",
+  "appName": "TaxiPro Driver",
+  "webDir": "public/driver",
+  "server": {
+    "androidScheme": "https"
+  }
+}

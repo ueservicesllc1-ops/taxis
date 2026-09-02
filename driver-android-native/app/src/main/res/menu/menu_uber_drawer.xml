@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/menu_earnings"
+        android:icon="@drawable/ic_earnings"
+        android:title="Ganancias" />
+
+    <item
+        android:id="@+id/menu_trips"
+        android:icon="@drawable/ic_activity"
+        android:title="Actividad" />
+
+    <item
+        android:id="@+id/menu_profile"
+        android:icon="@drawable/ic_person"
+        android:title="Perfil" />
+
+    <item
+        android:id="@+id/menu_vehicles"
+        android:icon="@drawable/ic_car"
+        android:title="Vehículos" />
+
+    <item
+        android:id="@+id/menu_documents"
+        android:icon="@drawable/ic_camera"
+        android:title="Documentos y Registro" />
+
+    <item
+        android:id="@+id/menu_safety"
+        android:icon="@drawable/ic_shield"
+        android:title="Centro de Seguridad" />
+
+    <item
+        android:id="@+id/menu_messages"
+        android:icon="@drawable/ic_messages"
+        android:title="Mensajes" />
+
+    <item
+        android:id="@+id/menu_help"
+        android:icon="@drawable/ic_help"
+        android:title="Ayuda" />
+
+    <item
+        android:id="@+id/menu_settings"
+        android:icon="@drawable/ic_settings"
+        android:title="Configuración" />
+
+    <item
+        android:id="@+id/menu_signout"
+        android:icon="@drawable/ic_logout"
+        android:title="Cerrar Sesión" />
+
+</menu>

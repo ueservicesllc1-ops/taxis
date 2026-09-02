@@ -3,78 +3,157 @@ service cloud.firestore {
   match /databases/{database}/documents {
     
     // ============================================
-    // TAXIPRO - Reglas de Seguridad
+    // HELPERS DE AUTENTICACIÓN Y ROLES (FASE 5C)
     // ============================================
-    
-    // Función helper para verificar autenticación
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null && request.auth.uid != null;
     }
     
-    // Función helper para verificar si es admin
+    function getUserRole() {
+      return isAuthenticated() && ('role' in request.auth.token) ? request.auth.token.role : 'driver';
+    }
+    
     function isAdmin() {
-      return isAuthenticated() && request.auth.token.role == 'admin';
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.admin == true
+      );
     }
     
-    // Función helper para verificar ownership
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    function isDispatcher() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'dispatcher' ||
+        request.auth.token.dispatcher == true
+      );
     }
     
-    // -------------------------------------------
-    // Colección: Conductores (drivers)
-    // -------------------------------------------
-    match /drivers/{driverId} {
-      // Crear: Solo el propio usuario autenticado
-      allow create: if isAuthenticated() && isOwner(driverId);
-      
-      // Leer: Usuarios autenticados (para que dispatch vea todos los drivers)
-      // En producción, considera restringir 'list' solo a admins
-      allow read: if isAuthenticated();
-      
-      // Actualizar: El propio driver o un admin
-      allow update: if isOwner(driverId) || isAdmin();
-      
-      // Eliminar: Solo admins
-      allow delete: if isAdmin();
+    function isSupervisor() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'supervisor' ||
+        request.auth.token.supervisor == true
+      );
     }
     
-    // -------------------------------------------
-    // Colección: Carreras (rides)
-    // -------------------------------------------
+    function isDriver() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'driver' ||
+        (!('role' in request.auth.token) && !isAdmin() && !isDispatcher() && !isSupervisor())
+      );
+    }
+    
+    function isStaff() {
+      return isAdmin() || isDispatcher() || isSupervisor();
+    }
+    
+    // ============================================
+    // 1. COLECCIÓN RIDES (CARRERAS)
+    // ============================================
+    // Autoridad de Escritura: Backend Admin SDK EXCLUSIVAMENTE.
+    // Ningún cliente (Web/Android/SDK directo) puede crear, modificar ni eliminar carreras.
     match /rides/{rideId} {
-      // Crear: Usuarios autenticados (dispatchers)
-      allow create: if isAuthenticated();
+      // Lectura: Staff tiene acceso global. Conductor solo a viajes asignados a él.
+      allow read: if isStaff() || (
+        isDriver() && (
+          resource.data.driverId == request.auth.uid ||
+          (resource.data.assignedDriver != null && resource.data.assignedDriver.id == request.auth.uid)
+        )
+      );
       
-      // Leer: Usuarios autenticados
-      allow read: if isAuthenticated();
+      // Bloqueo total de escritura directa desde clientes
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // 2. COLECCIÓN DRIVERS (CONDUCTORES Y TELEMETRÍA)
+    // ============================================
+    match /drivers/{driverId} {
+      // Lectura: Staff puede leer toda la flota. Conductor solo puede leer su propio perfil.
+      allow read: if isStaff() || (isAuthenticated() && request.auth.uid == driverId);
       
-      // Actualizar: Usuarios autenticados (drivers aceptan/completan)
-      allow update: if isAuthenticated();
+      // Creación: Staff o auto-registro del propio conductor (sin permitir escalación de rol)
+      allow create: if isStaff() || (
+        isAuthenticated() && 
+        request.auth.uid == driverId &&
+        (!('role' in request.resource.data) || request.resource.data.role == 'driver')
+      );
       
-      // Eliminar: Solo admins
+      // Actualización: 
+      // - Staff puede actualizar perfiles.
+      // - Conductor SOLO puede actualizar su propio documento y NO puede alterar campos protegidos.
+      allow update: if isStaff() || (
+        isAuthenticated() && 
+        request.auth.uid == driverId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role',
+          'earnings',
+          'balance',
+          'driverEarnings',
+          'adminApproved',
+          'totalEarnings'
+        ])
+      );
+      
+      // Eliminación: Solo Administrador
       allow delete: if isAdmin();
     }
     
-    // -------------------------------------------
-    // Colección: Configuración del sistema
-    // -------------------------------------------
-    match /settings/{document=**} {
-      allow read: if isAuthenticated();
+    // ============================================
+    // 3. COLECCIÓN DRIVER_EARNINGS Y EARNINGS (FINANZAS)
+    // ============================================
+    // Autoridad Financiera: Backend Admin SDK EXCLUSIVAMENTE.
+    match /driver_earnings/{earningId} {
+      allow read: if isStaff() || (
+        isAuthenticated() && (
+          resource.data.driverId == request.auth.uid ||
+          resource.data.userId == request.auth.uid
+        )
+      );
+      allow create, update, delete: if false;
+    }
+    
+    match /earnings/{earningId} {
+      allow read: if isStaff() || (
+        isAuthenticated() && (
+          resource.data.driverId == request.auth.uid ||
+          resource.data.userId == request.auth.uid
+        )
+      );
+      allow create, update, delete: if false;
+    }
+    
+    // ============================================
+    // 4. COLECCIÓN USERS (USUARIOS Y PERFILES)
+    // ============================================
+    match /users/{userId} {
+      allow read: if isStaff() || (isAuthenticated() && request.auth.uid == userId);
+      allow create: if isAdmin() || (
+        isAuthenticated() && 
+        request.auth.uid == userId &&
+        (!('role' in request.resource.data) || request.resource.data.role == 'driver')
+      );
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'claims', 'permissions'])
+      );
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // 5. COLECCIÓN COMPANIES (EMPRESAS / CONFIGURACIÓN)
+    // ============================================
+    match /companies/{companyId} {
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
     
-    // -------------------------------------------
-    // Colección: Analytics/Estadísticas
-    // -------------------------------------------
-    match /analytics/{reportId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+    // ============================================
+    // 6. REGLA POR DEFECTO: DENY BY DEFAULT
+    // ============================================
+    match /{document=**} {
+      allow read, write: if false;
     }
-    
-    // -------------------------------------------
-    // DENEGAR TODO LO DEMÁS POR DEFECTO
-    // -------------------------------------------
-    // Cualquier otra colección está bloqueada por defecto
   }
 }

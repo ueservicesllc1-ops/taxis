@@ -276,11 +276,26 @@ h3 i,
 }
 
 .form-section input:focus,
-.form-section textarea:focus {
+.form-section textarea:focus,
+.form-section select:focus,
+.driver-select:focus {
     outline: none;
     border-color: var(--primary);
     background: var(--bg-secondary);
     box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.1);
+}
+
+.form-section select,
+.driver-select {
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    transition: all 0.2s;
+    cursor: pointer;
 }
 
 .address-input {
@@ -844,4 +859,211 @@ h3 i,
     .main-layout {
         grid-template-columns: 340px 1fr 380px;
     }
+}
+
+/* Login Overlay */
+.login-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.3s ease;
+}
+
+.login-overlay.hidden {
+    display: none !important;
+}
+
+.login-box {
+    background: var(--bg-secondary, #1e293b);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 3rem 2.5rem;
+    max-width: 440px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+.login-box .logo {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1.5rem;
+}
+
+.login-box h2 {
+    color: #f8fafc;
+    font-size: 1.85rem;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+}
+
+.login-box p {
+    color: #94a3b8;
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+    line-height: 1.6;
+}
+
+.btn-google-login {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 14px 24px;
+    background: #ffffff;
+    color: #0f172a;
+    border: none;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.btn-google-login:hover {
+    background: #f8fafc;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px -5px rgba(255, 255, 255, 0.25);
+}
+
+.btn-google-login img {
+    width: 22px;
+    height: 22px;
+}
+
+/* ============================================
+   FASE 4B - DASHBOARD OPERATIVO EN TIEMPO REAL
+   ============================================ */
+.operations-dashboard-strip {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    right: 5rem;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(51, 65, 85, 0.8);
+    border-radius: 12px;
+    padding: 8px 14px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+    overflow-x: auto;
+}
+
+.ops-stats-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.group-title {
+    font-size: 10px;
+    font-weight: 800;
+    color: #94a3b8;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ops-stats-divider {
+    width: 1px;
+    height: 24px;
+    background: #334155;
+    margin: 0 6px;
+    flex-shrink: 0;
+}
+
+.stat-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(51, 65, 85, 0.6);
+    border-radius: 8px;
+    font-size: 11px;
+    color: #f8fafc;
+    white-space: nowrap;
+    transition: background 0.2s;
+}
+
+.badge-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.badge-num {
+    font-weight: 800;
+    font-size: 12px;
+    color: #ffffff;
+}
+
+.badge-label {
+    font-size: 10px;
+    color: #cbd5e1;
+}
+
+.attention-alerts-bar {
+    position: absolute;
+    top: 4.8rem;
+    left: 1rem;
+    right: 5rem;
+    z-index: 9;
+    pointer-events: auto;
+}
+
+.filter-chip {
+    padding: 0.35rem 0.65rem !important;
+    font-size: 0.75rem !important;
+}
+
+/* Formulario Avanzado de Despacho */
+.service-type-toggle button.active {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.service-live-summary {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    transition: all 0.2s ease-in-out;
+}
+
+.service-live-summary:hover {
+    border-color: rgba(59, 130, 246, 0.7) !important;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+}
+
+/* Barra de Búsqueda de Servicios (FASE 4C-3) */
+.job-search-box input:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.job-search-box button:hover {
+    color: #f8fafc !important;
+    background: rgba(255, 255, 255, 0.1) !important;
 }

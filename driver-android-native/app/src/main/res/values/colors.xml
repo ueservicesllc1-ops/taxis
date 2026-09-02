@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#276EF1</color>
+    <color name="primary_dark">#1E56BD</color>
+    <color name="accent">#06C167</color>
+    <color name="dark_bg">#000000</color>
+    <color name="card_bg">#181818</color>
+    <color name="card_stroke">#262626</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#AFAFAF</color>
+    <color name="status_online">#06C167</color>
+    <color name="status_offline">#E11900</color>
+    <color name="uber_blue">#276EF1</color>
+    <color name="uber_black">#000000</color>
+    <color name="uber_green">#06C167</color>
+    <color name="ic_launcher_background">#000000</color>
+</resources>

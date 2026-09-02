@@ -10,8 +10,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Google Maps API -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCN3M2CUT2BsIwiLrXTqMqLESyTdmPhBog&libraries=places"
-        async defer></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDmJ7N82IYjNAY1Uq5d4pLno8kvxheUn5Y&libraries=places"></script>
 </head>
 
 <body>
@@ -49,7 +48,8 @@
                 </div>
                 <div class="user-info">
                     <span id="dispatcherName">Operador</span>
-                    <div class="user-avatar">OP</div>
+                    <span id="dispatcherRole" style="background:#2563eb; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; text-transform:uppercase;">DISPATCHER</span>
+                    <div class="user-avatar" id="userAvatar">OP</div>
                 </div>
             </div>
         </header>
@@ -66,25 +66,74 @@
                     <span class="job-counter" id="pendingCounter">0 pendientes</span>
                 </div>
 
-                <form id="newJobForm" class="job-form">
+                <form id="newJobForm" class="job-form" novalidate onsubmit="return false;">
+                    <!-- 1. Modo del Servicio (Inmediato / Programado) -->
+                    <div class="form-section">
+                        <label>
+                            <i data-lucide="clock"></i>
+                            Tipo de Servicio
+                        </label>
+                        <div class="service-type-toggle" style="display:flex; gap:6px; background:#18181b; padding:4px; border-radius:8px; border:1px solid #27272a;">
+                            <button type="button" id="btnModeImmediate" class="btn-mode-toggle active" style="flex:1; padding:6px 10px; font-size:12px; font-weight:700; border:none; border-radius:6px; cursor:pointer; background:#2563eb; color:#fff; display:flex; align-items:center; justify-content:center; gap:4px;">
+                                <span>⚡ Inmediato</span>
+                            </button>
+                            <button type="button" id="btnModeScheduled" class="btn-mode-toggle" style="flex:1; padding:6px 10px; font-size:12px; font-weight:700; border:none; border-radius:6px; cursor:pointer; background:transparent; color:#a1a1aa; display:flex; align-items:center; justify-content:center; gap:4px;">
+                                <span>📅 Programado</span>
+                            </button>
+                        </div>
+                        <input type="hidden" id="serviceMode" value="immediate">
+                    </div>
+
+                    <!-- 2. Fecha y Hora de Recogida (Solo Programado) -->
+                    <div id="scheduledFieldsContainer" class="form-section" style="display:none; background:#0c4a6e20; border:1px solid #0284c740; border-radius:8px; padding:10px;">
+                        <label style="color:#38bdf8;">
+                            <i data-lucide="calendar"></i>
+                            Programación de Reserva
+                        </label>
+                        <div class="input-group" style="display:flex; gap:6px; margin-bottom:8px;">
+                            <div style="flex:1;">
+                                <span style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Fecha de Recogida</span>
+                                <input type="date" id="scheduledDate" class="address-input" style="padding:6px 8px; font-size:12px;">
+                            </div>
+                            <div style="flex:1;">
+                                <span style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Hora de Recogida</span>
+                                <input type="time" id="scheduledTime" class="address-input" style="padding:6px 8px; font-size:12px;">
+                            </div>
+                        </div>
+                        <div>
+                            <span style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Despachar con anticipación</span>
+                            <select id="dispatchLeadTime" class="driver-select" style="padding:6px 8px; font-size:12px;">
+                                <option value="5">⏱️ 5 minutos antes</option>
+                                <option value="10">⏱️ 10 minutos antes</option>
+                                <option value="15" selected>⏱️ 15 minutos antes (Recomendado)</option>
+                                <option value="20">⏱️ 20 minutos antes</option>
+                                <option value="30">⏱️ 30 minutos antes</option>
+                                <option value="45">⏱️ 45 minutos antes</option>
+                                <option value="60">⏱️ 60 minutos antes (1 hora)</option>
+                            </select>
+                        </div>
+                        <div id="scheduledPreviewAlert" style="font-size:11px; color:#7dd3fc; margin-top:6px; padding:4px 6px; background:#082f4960; border-radius:4px; display:none;"></div>
+                    </div>
+
+                    <!-- 3. Pasajero -->
                     <div class="form-section">
                         <label>
                             <i data-lucide="user"></i>
-                            Cliente
+                            Cliente / Pasajero
                         </label>
                         <div class="input-group">
-                            <input type="text" id="customerName" placeholder="Nombre del cliente" required>
-                            <input type="tel" id="customerPhone" placeholder="Teléfono" required>
+                            <input type="text" id="customerName" placeholder="Nombre del cliente" autocomplete="off">
+                            <input type="tel" id="customerPhone" placeholder="Teléfono" autocomplete="off">
                         </div>
                     </div>
 
+                    <!-- 4. Recogida y Destino -->
                     <div class="form-section">
                         <label>
                             <i data-lucide="map-pin"></i>
                             Punto de Recogida
                         </label>
-                        <input type="text" id="pickupAddress" class="address-input" placeholder="Ingrese dirección..."
-                            required>
+                        <input type="text" id="pickupAddress" class="address-input" placeholder="Ingrese dirección de recogida..." autocomplete="off">
                         <div id="pickupSuggestions" class="suggestions hidden"></div>
                     </div>
 
@@ -93,21 +142,103 @@
                             <i data-lucide="flag"></i>
                             Destino
                         </label>
-                        <input type="text" id="destinationAddress" class="address-input"
-                            placeholder="Ingrese dirección..." required>
+                        <input type="text" id="destinationAddress" class="address-input" placeholder="Ingrese dirección de destino..." autocomplete="off">
                         <div id="destinationSuggestions" class="suggestions hidden"></div>
                     </div>
 
+                    <!-- 5. Detalles del Viaje (Pasajeros, Categoría, Pago) -->
+                    <div class="form-section">
+                        <label>
+                            <i data-lucide="settings-2"></i>
+                            Detalles del Servicio
+                        </label>
+                        <div style="display:flex; gap:6px; margin-bottom:8px;">
+                            <div style="flex:1;">
+                                <span style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Pasajeros</span>
+                                <input type="number" id="passengerCount" value="1" min="1" max="8" style="width:100%; padding:6px 8px; background:#18181b; color:#fff; border:1px solid #27272a; border-radius:6px; font-size:12px;">
+                            </div>
+                            <div style="flex:2;">
+                                <span style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Vehículo</span>
+                                <select id="vehicleCategory" class="driver-select" style="padding:6px 8px; font-size:12px;">
+                                    <option value="standard" selected>🚗 Standard (Sedán)</option>
+                                    <option value="xl">🚙 SUV / XL</option>
+                                    <option value="van">🚐 Van (Grupos)</option>
+                                    <option value="vip">✨ VIP / Ejecutivo</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:6px;">
+                            <div style="flex:1;">
+                                <span style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Método de Pago</span>
+                                <select id="paymentMethod" class="driver-select" style="padding:6px 8px; font-size:12px;">
+                                    <option value="cash" selected>💵 Efectivo</option>
+                                    <option value="card">💳 Tarjeta / POS</option>
+                                    <option value="corporate">🏢 Cuenta / Crédito</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 6. Tarifa (Calculada vs Manual) -->
+                    <div class="form-section">
+                        <label>
+                            <i data-lucide="dollar-sign"></i>
+                            Tarifa del Servicio
+                        </label>
+                        <div style="display:flex; gap:12px; margin-bottom:6px; align-items:center;">
+                            <label style="font-size:11px; display:flex; align-items:center; gap:4px; cursor:pointer; color:#e4e4e7; margin:0;">
+                                <input type="radio" name="fareType" id="fareTypeCalculated" value="calculated" checked>
+                                <span>Calculada por Ruta</span>
+                            </label>
+                            <label style="font-size:11px; display:flex; align-items:center; gap:4px; cursor:pointer; color:#e4e4e7; margin:0;">
+                                <input type="radio" name="fareType" id="fareTypeManual" value="manual">
+                                <span>Tarifa Manual</span>
+                            </label>
+                        </div>
+                        <div id="manualFareContainer" style="display:none; margin-top:4px;">
+                            <input type="number" id="manualFareInput" placeholder="Monto fijo ($ ej. 25.00)" step="0.50" min="0" style="width:100%; padding:6px 8px; background:#18181b; color:#facc15; border:1px solid #eab308; border-radius:6px; font-size:13px; font-weight:700;">
+                        </div>
+                    </div>
+
+                    <!-- 7. Asignar Taxista (Opcional) -->
+                    <div class="form-section">
+                        <label>
+                            <i data-lucide="user-check"></i>
+                            Asignar Taxista (Opcional)
+                        </label>
+                        <select id="assignedDriverSelect" class="driver-select">
+                            <option value="">⚡ Enviar a todos los taxistas activos (Automático)</option>
+                        </select>
+                    </div>
+
+                    <!-- 8. Notas -->
                     <div class="form-section">
                         <label>
                             <i data-lucide="file-text"></i>
                             Notas
                         </label>
-                        <textarea id="notes" placeholder="Información adicional..." rows="2"></textarea>
+                        <textarea id="notes" placeholder="Información adicional (ej: cliente espera en puerta principal...)" rows="2"></textarea>
                     </div>
 
-                    <button type="submit" class="btn-create-job">
-                        <span>Crear Carrera</span>
+                    <!-- 9. Resumen en Vivo antes de Crear -->
+                    <div id="serviceLiveSummary" class="service-live-summary" style="background:#18181b; border:1px solid #3b82f640; border-radius:8px; padding:10px; font-size:11px; margin-bottom:12px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; border-bottom:1px solid #27272a; padding-bottom:4px;">
+                            <span id="summaryServiceType" style="font-weight:700; color:#38bdf8;">⚡ SERVICIO INMEDIATO</span>
+                            <span id="summaryFare" style="font-weight:800; font-size:13px; color:#facc15;">$15.00</span>
+                        </div>
+                        <div id="summaryScheduleRow" style="display:none; color:#93c5fd; margin-bottom:4px;">
+                            📅 Recogida: <strong id="summaryPickupTime">--:--</strong> (Despacho: <span id="summaryDispatchTime">--:--</span>)
+                        </div>
+                        <div style="color:#d4d4d8; line-height:1.4;">
+                            👤 <span id="summaryPassenger">Cliente en Espera</span><br>
+                            📍 <span id="summaryRoute">Origen ➔ Destino</span><br>
+                            🚗 <span id="summaryVehicle">Standard</span> • <span id="summaryPassengers">1 Pasajero</span> • <span id="summaryPayment">Efectivo</span>
+                        </div>
+                    </div>
+
+                    <!-- 10. Botón de Creación -->
+                    <button type="button" id="btnSubmitJob" class="btn-create-job">
+                        <span>Crear Servicio</span>
                         <i data-lucide="arrow-right"></i>
                     </button>
                 </form>
@@ -138,8 +269,79 @@
                     </button>
                 </div>
 
-                <!-- Map Stats -->
-                <div class="map-stats">
+                <!-- Live Operations Dashboard Strip (FASE 4B) -->
+                <div class="operations-dashboard-strip" id="opsDashboardStrip">
+                    <div class="ops-stats-group">
+                        <span class="group-title"><i data-lucide="activity"></i> CARRERAS</span>
+                        <div class="stat-badge stat-pending" title="Carreras esperando asignación">
+                            <span class="badge-dot" style="background:#f59e0b;"></span>
+                            <span class="badge-num" id="statPendingRides">0</span>
+                            <span class="badge-label">Pendientes</span>
+                        </div>
+                        <div class="stat-badge stat-offered" title="Carreras ofertadas esperando aceptación">
+                            <span class="badge-dot" style="background:#8b5cf6;"></span>
+                            <span class="badge-num" id="statOfferedRides">0</span>
+                            <span class="badge-label">Ofertadas</span>
+                        </div>
+                        <div class="stat-badge stat-assigned" title="Carreras asignadas o aceptadas">
+                            <span class="badge-dot" style="background:#3b82f6;"></span>
+                            <span class="badge-num" id="statAssignedRides">0</span>
+                            <span class="badge-label">Asignadas</span>
+                        </div>
+                        <div class="stat-badge stat-active" title="Pasajero a bordo / En viaje">
+                            <span class="badge-dot" style="background:#10b981;"></span>
+                            <span class="badge-num" id="statActiveRides">0</span>
+                            <span class="badge-label">En Viaje</span>
+                        </div>
+                        <div class="stat-badge stat-completed" title="Viajes completados">
+                            <span class="badge-dot" style="background:#6b7280;"></span>
+                            <span class="badge-num" id="statCompletedRides">0</span>
+                            <span class="badge-label">Completadas</span>
+                        </div>
+                        <div class="stat-badge stat-cancelled" title="Viajes cancelados">
+                            <span class="badge-dot" style="background:#ef4444;"></span>
+                            <span class="badge-num" id="statCancelledRides">0</span>
+                            <span class="badge-label">Canceladas</span>
+                        </div>
+                    </div>
+
+                    <div class="ops-stats-divider"></div>
+
+                    <div class="ops-stats-group">
+                        <span class="group-title"><i data-lucide="users"></i> CONDUCTORES</span>
+                        <div class="stat-badge stat-drivers-online" title="Conductores conectados">
+                            <span class="badge-dot" style="background:#06b6d4;"></span>
+                            <span class="badge-num" id="statOnlineDrivers">0</span>
+                            <span class="badge-label">Online</span>
+                        </div>
+                        <div class="stat-badge stat-drivers-available" title="Disponibles para despacho">
+                            <span class="badge-dot" style="background:#10b981;"></span>
+                            <span class="badge-num" id="statAvailableDrivers">0</span>
+                            <span class="badge-label">Disponibles</span>
+                        </div>
+                        <div class="stat-badge stat-drivers-offered" title="En proceso de oferta">
+                            <span class="badge-dot" style="background:#f59e0b;"></span>
+                            <span class="badge-num" id="statOfferedDrivers">0</span>
+                            <span class="badge-label">Ofertados</span>
+                        </div>
+                        <div class="stat-badge stat-drivers-busy" title="En carrera activa">
+                            <span class="badge-dot" style="background:#ef4444;"></span>
+                            <span class="badge-num" id="statBusyDrivers">0</span>
+                            <span class="badge-label">Ocupados</span>
+                        </div>
+                        <div class="stat-badge stat-drivers-offline" title="Desconectados">
+                            <span class="badge-dot" style="background:#6b7280;"></span>
+                            <span class="badge-num" id="statOfflineDrivers">0</span>
+                            <span class="badge-label">Offline</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Operational Attention Bar (FASE 4B) -->
+                <div class="attention-alerts-bar" id="attentionAlertsBar"></div>
+
+                <!-- Map Stats (Preservado para compatibilidad) -->
+                <div class="map-stats" style="display:none;">
                     <div class="stat-item">
                         <span class="stat-icon"><i data-lucide="car"></i></span>
                         <span class="stat-value" id="totalDrivers">0</span>
@@ -168,23 +370,48 @@
                     </div>
                 </div>
 
-                <!-- Filters -->
-                <div class="filters">
+                <!-- Search Bar (FASE 4C-3: Búsqueda de Servicios) -->
+                <div class="job-search-box" style="padding: 0.5rem 0.75rem 0.25rem 0.75rem; position: relative;">
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <i data-lucide="search" style="position: absolute; left: 10px; width: 14px; height: 14px; color: #94a3b8; pointer-events: none;"></i>
+                        <input type="text" id="jobSearchInput" placeholder="🔎 Buscar por ID, cliente, tel, dirección..." autocomplete="off" style="width: 100%; padding: 6px 28px 6px 30px; background: #18181b; color: #f8fafc; border: 1px solid #334155; border-radius: 8px; font-size: 11px; outline: none; transition: border-color 0.2s;">
+                        <button type="button" id="btnSearchClear" title="Limpiar búsqueda" style="position: absolute; right: 6px; background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 13px; font-weight: bold; width: 20px; height: 20px; display: none; align-items: center; justify-content: center; border-radius: 50%;">✕</button>
+                    </div>
+                </div>
+
+                <!-- Filters (FASE 4B: Completo y en tiempo real) -->
+                <div class="filters" style="display:flex; flex-wrap:wrap; gap:4px; padding:0.5rem 0.75rem;">
                     <button class="filter-chip active" data-filter="all">
                         <span>Todas</span>
                         <span class="chip-count" id="countAll">0</span>
                     </button>
                     <button class="filter-chip" data-filter="pending">
-                        <span>Pendiente</span>
+                        <span>Pendientes</span>
                         <span class="chip-count" id="countPending">0</span>
                     </button>
-                    <button class="filter-chip" data-filter="accepted">
-                        <span>Aceptada</span>
-                        <span class="chip-count" id="countAccepted">0</span>
+                    <button class="filter-chip" data-filter="offered">
+                        <span>Ofertadas</span>
+                        <span class="chip-count" id="countOffered">0</span>
+                    </button>
+                    <button class="filter-chip" data-filter="assigned">
+                        <span>Asignadas</span>
+                        <span class="chip-count" id="countAssigned">0</span>
+                    </button>
+                    <button class="filter-chip" data-filter="arrived_at_pickup">
+                        <span>En Recogida</span>
+                        <span class="chip-count" id="countArrived">0</span>
                     </button>
                     <button class="filter-chip" data-filter="in_progress">
-                        <span>En Curso</span>
+                        <span>En Viaje</span>
                         <span class="chip-count" id="countInProgress">0</span>
+                    </button>
+                    <button class="filter-chip" data-filter="completed">
+                        <span>Completadas</span>
+                        <span class="chip-count" id="countCompleted">0</span>
+                    </button>
+                    <button class="filter-chip" data-filter="cancelled">
+                        <span>Canceladas</span>
+                        <span class="chip-count" id="countCancelled">0</span>
                     </button>
                 </div>
 
@@ -219,6 +446,227 @@
         </div>
     </div>
 
+    <!-- Modal Cancelar Asignación / Reasignar Conductor -->
+    <div id="cancelAssignmentModal" class="modal-overlay hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.75); display:none; align-items:center; justify-content:center; z-index:9999;">
+        <div class="modal-content" style="background:#18181b; border:1px solid #3f3f46; border-radius:12px; width:90%; max-width:480px; padding:20px; color:#f4f4f5; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #27272a; padding-bottom:12px;">
+                <h3 style="display:flex; align-items:center; gap:8px; color:#f87171; font-size:16px; margin:0;">
+                    <i data-lucide="alert-triangle"></i> Cancelar Asignación de Carrera
+                </h3>
+                <button type="button" class="btn-icon close-modal" id="btnCloseCancelModal" style="background:none; border:none; color:#a1a1aa; font-size:20px; cursor:pointer;">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:16px 0;">
+                <input type="hidden" id="cancelModalRideId">
+                <div style="background:#0f172a; border-left:4px solid #38bdf8; padding:10px 14px; border-radius:6px; margin-bottom:14px; font-size:13px;">
+                    <div id="cancelModalRideInfo" style="color:#f8fafc; font-weight:bold;">#ID - Recogida</div>
+                    <div id="cancelModalDriverInfo" style="color:#38bdf8; margin-top:4px;">Taxista actual: Conductor</div>
+                </div>
+
+                <div class="form-section" style="margin-bottom:14px;">
+                    <label style="font-weight:600; font-size:13px; margin-bottom:6px; display:block; color:#e4e4e7;">
+                        Motivo de la cancelación / Incidencia:
+                    </label>
+                    <select id="cancelReasonSelect" class="driver-select" style="width:100%; padding:8px 10px; background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:13px; margin-bottom:8px;">
+                        <option value="Accidente o falla mecánica del vehículo">⚠️ Accidente o falla mecánica del vehículo</option>
+                        <option value="Taxista no avanza / Demora excesiva">⏳ Taxista no avanza / Demora excesiva</option>
+                        <option value="Taxista no responde llamadas">📵 Taxista no responde llamadas</option>
+                        <option value="Taxista solicitó cancelar la carrera">🛑 Taxista solicitó cancelar la carrera</option>
+                        <option value="Cliente solicitó cambio de conductor">👤 Cliente solicitó cambio de conductor</option>
+                        <option value="otro">Otro motivo (especificar abajo)...</option>
+                    </select>
+                    <input type="text" id="cancelReasonOther" placeholder="Escribe el motivo detallado..." style="display:none; width:100%; padding:8px 10px; background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:13px;" autocomplete="off">
+                </div>
+
+                <div class="form-section">
+                    <label style="font-weight:600; font-size:13px; margin-bottom:8px; display:block; color:#e4e4e7;">
+                        ¿Qué deseas hacer con la carrera?
+                    </label>
+                    <div style="display:flex; flex-direction:column; gap:10px; font-size:13px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                            <input type="radio" name="reassignAction" value="auto" checked>
+                            <span>⚡ <strong>Reasignar automáticamente</strong> a otro taxista activo (Buscar reemplazo)</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                            <input type="radio" name="reassignAction" value="manual">
+                            <span>🚕 <strong>Elegir taxista específico:</strong></span>
+                        </label>
+                        <select id="cancelReassignDriverSelect" class="driver-select" style="margin-left:24px; width:calc(100% - 24px); padding:6px 10px; background:#27272a; color:#fff; border:1px solid #3b82f6; border-radius:6px; font-size:12px; display:none;">
+                            <option value="">-- Seleccionar taxista disponible --</option>
+                        </select>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#f87171;">
+                            <input type="radio" name="reassignAction" value="cancel">
+                            <span>❌ <strong>Cancelar carrera definitivamente</strong> (No volver a ofertar)</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid #27272a; padding-top:12px;">
+                <button type="button" class="btn btn-secondary" id="btnDismissCancelModal" style="padding:8px 14px; background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:13px; cursor:pointer;">Volver</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmCancelAssignment" style="padding:8px 16px; background:#dc2626; color:#fff; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer;">Confirmar Acción</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Ride Modal (FASE 4C-4: Edición Segura de Servicios) -->
+    <div id="editRideModal" class="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); z-index:9999; justify-content:center; align-items:center;">
+        <div class="modal-content" style="background:#18181b; border:1px solid #3f3f46; border-radius:12px; max-width:550px; width:90%; max-height:90vh; overflow-y:auto; padding:20px; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
+            <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #27272a; padding-bottom:12px; margin-bottom:16px;">
+                <div>
+                    <h3 style="margin:0; font-size:16px; color:#fff; display:flex; align-items:center; gap:8px;">
+                        <span>✏️ Editar Servicio</span>
+                        <span id="editRideIdBadge" style="font-size:12px; background:#27272a; color:#a1a1aa; padding:2px 8px; border-radius:6px; font-family:monospace;">#---</span>
+                    </h3>
+                    <div id="editRideStatusNotice" style="font-size:12px; color:#94a3b8; margin-top:4px;">Estado: <strong id="editRideStatusText">--</strong></div>
+                </div>
+                <button type="button" id="btnCloseEditModal" style="background:transparent; border:none; color:#a1a1aa; font-size:18px; cursor:pointer; font-weight:bold;">✕</button>
+            </div>
+            
+            <form id="editRideForm" style="display:flex; flex-direction:column; gap:14px;">
+                <input type="hidden" id="editRideId">
+                <input type="hidden" id="editRideVersion">
+
+                <!-- Datos de Pasajero -->
+                <div style="background:#27272a; padding:12px; border-radius:8px;">
+                    <div style="font-size:11px; font-weight:bold; color:#94a3b8; text-transform:uppercase; margin-bottom:8px;">👤 Datos del Pasajero</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div>
+                            <label style="font-size:11px; color:#cbd5e1;">Nombre</label>
+                            <input type="text" id="editCustomerName" style="width:100%; padding:6px 10px; background:#18181b; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:12px;" required>
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#cbd5e1;">Teléfono</label>
+                            <input type="text" id="editCustomerPhone" style="width:100%; padding:6px 10px; background:#18181b; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:12px;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ubicaciones -->
+                <div style="background:#27272a; padding:12px; border-radius:8px;">
+                    <div style="font-size:11px; font-weight:bold; color:#94a3b8; text-transform:uppercase; margin-bottom:8px;">📍 Ruta y Ubicaciones</div>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        <div>
+                            <label style="font-size:11px; color:#cbd5e1;">Punto de Recogida</label>
+                            <input type="text" id="editPickupAddress" style="width:100%; padding:6px 10px; background:#18181b; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:12px;" required>
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#cbd5e1;">Destino</label>
+                            <input type="text" id="editDestinationAddress" style="width:100%; padding:6px 10px; background:#18181b; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:12px;" required>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Programación (Solo visible/editable si es scheduled) -->
+                <div id="editScheduledSection" style="background:#0c4a6e; padding:12px; border-radius:8px; display:none; border:1px solid #0284c7;">
+                    <div style="font-size:11px; font-weight:bold; color:#7dd3fc; text-transform:uppercase; margin-bottom:8px;">📅 Programación de Reserva</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+                        <div>
+                            <label style="font-size:11px; color:#bae6fd;">Fecha</label>
+                            <input type="date" id="editScheduledDate" style="width:100%; padding:6px; background:#082f49; color:#fff; border:1px solid #0284c7; border-radius:6px; font-size:11px;">
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#bae6fd;">Hora</label>
+                            <input type="time" id="editScheduledTime" style="width:100%; padding:6px; background:#082f49; color:#fff; border:1px solid #0284c7; border-radius:6px; font-size:11px;">
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#bae6fd;">Antelación</label>
+                            <select id="editDispatchLeadTime" style="width:100%; padding:6px; background:#082f49; color:#fff; border:1px solid #0284c7; border-radius:6px; font-size:11px;">
+                                <option value="5">5 min</option>
+                                <option value="10">10 min</option>
+                                <option value="15">15 min</option>
+                                <option value="20">20 min</option>
+                                <option value="30">30 min</option>
+                                <option value="45">45 min</option>
+                                <option value="60">60 min</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Parámetros del Viaje -->
+                <div style="background:#27272a; padding:12px; border-radius:8px;">
+                    <div style="font-size:11px; font-weight:bold; color:#94a3b8; text-transform:uppercase; margin-bottom:8px;">⚙️ Detalles del Servicio</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+                        <div>
+                            <label style="font-size:11px; color:#cbd5e1;">Pasajeros</label>
+                            <select id="editPassengerCount" style="width:100%; padding:6px; background:#18181b; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:12px;">
+                                <option value="1">1 pers.</option>
+                                <option value="2">2 pers.</option>
+                                <option value="3">3 pers.</option>
+                                <option value="4">4 pers.</option>
+                                <option value="5">5 pers.</option>
+                                <option value="6">6 pers.</option>
+                                <option value="7">7 pers.</option>
+                                <option value="8">8 pers.</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#cbd5e1;">Vehículo</label>
+                            <select id="editVehicleCategory" style="width:100%; padding:6px; background:#18181b; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:12px;">
+                                <option value="standard">Standard</option>
+                                <option value="xl">SUV / XL</option>
+                                <option value="van">Van</option>
+                                <option value="vip">VIP / Ejec.</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#cbd5e1;">Pago</label>
+                            <select id="editPaymentMethod" style="width:100%; padding:6px; background:#18181b; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:12px;">
+                                <option value="cash">Efectivo</option>
+                                <option value="card">Tarjeta / POS</option>
+                                <option value="corporate">Corporativo</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tarifa y Notas -->
+                <div style="background:#27272a; padding:12px; border-radius:8px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px;">
+                        <div>
+                            <label style="font-size:11px; color:#cbd5e1;">Tarifa ($)</label>
+                            <input type="number" step="0.5" min="0" id="editFare" style="width:100%; padding:6px 10px; background:#18181b; color:#facc15; font-weight:bold; border:1px solid #3f3f46; border-radius:6px; font-size:13px;">
+                        </div>
+                        <div style="display:flex; align-items:center; margin-top:16px;">
+                            <label style="font-size:11px; color:#94a3b8; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                                <input type="checkbox" id="editIsManualFare">
+                                <span>Tarifa Fija Manual</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="font-size:11px; color:#cbd5e1;">Notas Operativas</label>
+                        <textarea id="editNotes" rows="2" style="width:100%; padding:6px 10px; background:#18181b; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:12px; resize:none;"></textarea>
+                    </div>
+                </div>
+
+                <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid #27272a; padding-top:12px;">
+                    <button type="button" id="btnCancelEdit" style="padding:8px 14px; background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; font-size:13px; cursor:pointer;">Cancelar</button>
+                    <button type="submit" id="btnSaveEdit" style="padding:8px 18px; background:#2563eb; color:#fff; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+                        <span>💾 Guardar Cambios</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dispatcher Google Login Overlay -->
+    <div id="loginOverlay" class="login-overlay">
+        <div class="login-box">
+            <div class="logo">
+                <svg width="64" height="64" viewBox="0 0 40 40" fill="none">
+                    <rect width="40" height="40" rx="8" fill="#FFD700" />
+                    <path d="M10 20L20 10L30 20L20 30L10 20Z" fill="#000" />
+                </svg>
+            </div>
+            <h2>TaxiPro Central</h2>
+            <p>Acceso restringido. Por favor, inicia sesión con Google para acceder al panel de despacho.</p>
+            <button id="googleLoginBtn" class="btn-google-login">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+                <span>Acceder con Google</span>
+            </button>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div id="toastContainer" class="toast-container"></div>
 
@@ -226,7 +674,7 @@
     <audio id="notificationSound" src="dispatch/sounds/notification.mp3"></audio>
 
     <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
-    <script type="module" src="dispatch/js/dispatch-v2.js"></script>
+    <script type="module" src="dispatch/js/dispatch-v2.js?v=2.5.1"></script>
     <script>
         // Initialize Lucide icons after page load
         document.addEventListener('DOMContentLoaded', () => {

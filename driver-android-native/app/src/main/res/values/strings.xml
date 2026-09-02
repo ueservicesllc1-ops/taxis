@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TaxiPro Driver</string>
+    <string name="status_online">En Línea</string>
+    <string name="status_offline">Desconectado</string>
+    <string name="go_online">CONECTARSE</string>
+    <string name="go_offline">DESCONECTARSE</string>
+    <string name="welcome_driver">Bienvenido, Conductor</string>
+    <string name="login_with_google">Continuar con Google</string>
+    <string name="default_web_client_id_placeholder">563172013263-fa0bskpv0bvd9lhtt1crajr180o6o4jb.apps.googleusercontent.com</string>
+    <string name="server_url">http://10.0.2.2:3000</string>
+</resources>

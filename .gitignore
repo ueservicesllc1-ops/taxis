@@ -47,3 +47,17 @@ ui-debug.log*
 *.pem
 *.key
 secrets/
+
+# Android & Binaries
+*.apk
+*.aab
+.gradle/
+**/build/
+local.properties
+Captures/
+.externalNativeBuild/
+.cxx/
+
+# Server Runtime Cache
+server/data/*.json
+!server/data/.gitkeep

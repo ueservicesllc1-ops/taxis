@@ -8,7 +8,7 @@
     "FIREBASE_MESSAGING_SENDER_ID": "563172013263",
     "FIREBASE_APP_ID": "1:563172013263:web:2d162dab07f2222f4233ba",
     "FIREBASE_MEASUREMENT_ID": "G-SJF9G3N639",
-    "GOOGLE_MAPS_API_KEY": "AIzaSyCN3M2CUT2BsIwiLrXTqMqLESyTdmPhBog",
+    "GOOGLE_MAPS_API_KEY": "AIzaSyDmJ7N82IYjNAY1Uq5d4pLno8kvxheUn5Y",
     "JWT_SECRET": "cambiar-por-string-seguro-minimo-32-caracteres-random",
     "SESSION_SECRET": "otro-string-seguro-para-sesiones-random",
     "ALLOWED_ORIGINS": "https://tu-app.railway.app,https://tu-dominio.com",

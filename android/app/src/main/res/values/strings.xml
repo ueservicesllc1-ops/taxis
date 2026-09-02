@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TaxiPro Driver</string>
+    <string name="title_activity_main">TaxiPro Driver</string>
+    <string name="package_name">com.taxipro.driver</string>
+    <string name="custom_url_scheme">com.taxipro.driver</string>
+</resources>

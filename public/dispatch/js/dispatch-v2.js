@@ -855,7 +855,7 @@ function getDriverOperationalStatus(driver) {
     if (!driver.isOnline || driver.status === 'offline') return 'offline';
     if (driver.status === 'offered' || driver.status === 'assigned') return 'offered';
     if (driver.status === 'busy' || driver.status === 'in_progress' || driver.status === 'arrived_at_pickup' || driver.currentRide || driver.currentRideId) return 'busy';
-    if (driver.available) return 'available';
+    if (driver.available !== false) return 'available';
     return 'busy';
 }
 
@@ -1201,6 +1201,12 @@ function renderDriversList() {
 
     if (state.pendingDrivers.length === 0 && state.drivers.length === 0) {
         listEl.innerHTML = '<div class="empty-state"><p style="color:#71717a; font-size:12px; text-align:center; padding:12px;">No hay taxistas registrados</p></div>';
+    }
+
+    const availableCountEl = document.getElementById('availableCount');
+    if (availableCountEl) {
+        const availCount = state.drivers.filter(d => getDriverOperationalStatus(d) === 'available').length;
+        availableCountEl.textContent = String(availCount);
     }
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -1856,12 +1862,12 @@ function updateStats() {
     const arrivedCount = rides.filter(r => r.status === 'arrived_at_pickup').length;
 
     // 2. DASHBOARD DE CONDUCTORES (Estado local state.drivers)
-    const onlineDrivers = drivers.filter(d => d.isOnline || d.status !== 'offline');
+    const onlineDrivers = drivers.filter(d => getDriverOperationalStatus(d) !== 'offline');
     const onlineCount = onlineDrivers.length;
-    const availableCount = drivers.filter(d => (d.isOnline || d.status !== 'offline') && d.available && d.status === 'available').length;
-    const offeredDriversCount = drivers.filter(d => d.status === 'offered' || d.status === 'assigned').length;
-    const busyCount = drivers.filter(d => d.status === 'busy' || d.status === 'in_progress' || d.status === 'arrived_at_pickup' || (!d.available && d.status !== 'offline' && d.status !== 'offered')).length;
-    const offlineCount = drivers.filter(d => !d.isOnline || d.status === 'offline').length;
+    const availableCount = drivers.filter(d => getDriverOperationalStatus(d) === 'available').length;
+    const offeredDriversCount = drivers.filter(d => getDriverOperationalStatus(d) === 'offered').length;
+    const busyCount = drivers.filter(d => getDriverOperationalStatus(d) === 'busy').length;
+    const offlineCount = drivers.filter(d => getDriverOperationalStatus(d) === 'offline').length;
 
     // 3. ACTUALIZACIÓN DOM - DASHBOARD OPERATIVO
     const setText = (id, val) => {

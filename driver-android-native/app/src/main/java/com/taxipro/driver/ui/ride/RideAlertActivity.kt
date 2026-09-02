@@ -92,7 +92,7 @@ class RideAlertActivity : AppCompatActivity(), OnMapReadyCallback {
             countDownTimer?.cancel()
             binding.btnAccept.isEnabled = false
             binding.btnDecline.isEnabled = false
-            binding.btnAccept.text = "Confirmando..."
+            (binding.btnAccept.getChildAt(0) as? android.widget.TextView)?.text = "Confirmando..."
 
             // Enviar aceptación al backend de forma segura
             socket?.emit("ride:accept", rideId)
@@ -323,24 +323,6 @@ class RideAlertActivity : AppCompatActivity(), OnMapReadyCallback {
                 finish()
             }
         }.start()
-    }
-
-    private fun vibratePhone() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-                vibratorManager.defaultVibrator.vibrate(
-                    VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1)
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                val vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
-                @Suppress("DEPRECATION")
-                vibrator.vibrate(longArrayOf(0, 400, 200, 400), -1)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
     }
 
     override fun onDestroy() {

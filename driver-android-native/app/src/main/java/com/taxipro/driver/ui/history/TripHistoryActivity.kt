@@ -22,6 +22,7 @@ class TripHistoryActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityTripHistoryBinding
     private lateinit var adapter: TripHistoryAdapter
+    private val tripsList = mutableListOf<JSONObject>()
     private val auth by lazy { FirebaseAuth.getInstance() }
 
     private var currentFilter = "all"

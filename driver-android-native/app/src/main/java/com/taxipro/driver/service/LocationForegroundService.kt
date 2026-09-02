@@ -162,6 +162,7 @@ class LocationForegroundService : Service() {
             Log.e(TAG, "Socket connection error", e)
         }
     }
+}
 
     private fun setupLocationCallback() {
         locationCallback = object : LocationCallback() {

@@ -8,7 +8,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.util.Log
+import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -30,16 +32,29 @@ import com.taxipro.driver.config.AppConfig
 import com.taxipro.driver.databinding.ActivityActiveRideBinding
 import io.socket.client.IO
 import io.socket.client.Socket
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.Locale
+import kotlin.concurrent.thread
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
-class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
+class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech.OnInitListener {
 
     private lateinit var binding: ActivityActiveRideBinding
     private var googleMap: GoogleMap? = null
     private var socket: Socket? = null
+    private var tts: TextToSpeech? = null
+    private var isVoiceEnabled = true
+
+    // 0: 3D Conducción, 1: 2D Cenital, 2: Vista General de Ruta
+    private var cameraMode = 0
+    private var isAutoFollowing = true
 
     // 0: En camino a recoger, 1: En punto de encuentro, 2: En ruta al destino
     private var rideStage = 0
@@ -62,14 +77,17 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
     private var driverMarker: Marker? = null
     private var targetMarker: Marker? = null
     private var currentRoutePolyline: Polyline? = null
+    private var decodedRoutePoints: List<LatLng> = emptyList()
 
     private val navHandler = Handler(Looper.getMainLooper())
-    private var isTracking = true
+    private var lastSpokenInstruction = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityActiveRideBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        tts = TextToSpeech(this, this)
 
         rideId = intent.getStringExtra("rideId") ?: ""
         pickupAddress = intent.getStringExtra("pickup") ?: "Punto de Recogida"
@@ -96,16 +114,36 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
 
         updateUiStage()
 
+        // Controles de Cámara y Navegación
+        binding.btnCameraMode.setOnClickListener {
+            toggleCameraMode()
+        }
+
+        binding.btnRecenter.setOnClickListener {
+            isAutoFollowing = true
+            binding.btnRecenter.visibility = View.GONE
+            applyCameraForCurrentMode(isSmooth = true)
+        }
+
+        binding.btnVoiceToggle.setOnClickListener {
+            isVoiceEnabled = !isVoiceEnabled
+            if (isVoiceEnabled) {
+                binding.ivVoiceIcon.setColorFilter(Color.parseColor("#22C55E"))
+                speakVoiceInstruction("Guía por voz activada")
+                Toast.makeText(this, "Guía por voz activada", Toast.LENGTH_SHORT).show()
+            } else {
+                binding.ivVoiceIcon.setColorFilter(Color.parseColor("#94A3B8"))
+                tts?.stop()
+                Toast.makeText(this, "Guía por voz silenciada", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         binding.btnRideAction.setOnClickListener {
             handleStageAdvance()
         }
 
         binding.btnCancelActiveRide.setOnClickListener {
             showCancelRideDialog()
-        }
-
-        binding.btnNavigateExternal.setOnClickListener {
-            launchExternalNavigation()
         }
 
         binding.btnCallPassenger.setOnClickListener {
@@ -122,6 +160,47 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         }
 
         startNavigationUpdates()
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val result = tts?.setLanguage(Locale("es", "US"))
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                tts?.setLanguage(Locale("es", "ES"))
+            }
+            speakVoiceInstruction("Navegación iniciada. Conduzca con precaución.")
+        }
+    }
+
+    private fun speakVoiceInstruction(text: String) {
+        if (!isVoiceEnabled || text == lastSpokenInstruction) return
+        lastSpokenInstruction = text
+        try {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NAV_INSTRUCTION")
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun toggleCameraMode() {
+        cameraMode = (cameraMode + 1) % 3
+        when (cameraMode) {
+            0 -> {
+                binding.tvCameraModeText.text = "3D CONDUCCIÓN"
+                binding.ivCameraIcon.setColorFilter(Color.parseColor("#22C55E"))
+            }
+            1 -> {
+                binding.tvCameraModeText.text = "2D CENITAL"
+                binding.ivCameraIcon.setColorFilter(Color.parseColor("#3B82F6"))
+            }
+            2 -> {
+                binding.tvCameraModeText.text = "RUTA COMPLETA"
+                binding.ivCameraIcon.setColorFilter(Color.parseColor("#F59E0B"))
+            }
+        }
+        isAutoFollowing = true
+        binding.btnRecenter.visibility = View.GONE
+        applyCameraForCurrentMode(isSmooth = true)
     }
 
     private fun persistActiveRideState() {
@@ -161,6 +240,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
 
                 socket?.on("ride:cancelled") {
                     runOnUiThread {
+                        speakVoiceInstruction("La carrera fue cancelada por la central.")
                         Toast.makeText(this, "Este viaje fue cancelado por la central.", Toast.LENGTH_LONG).show()
                         clearActiveRideState()
                         finish()
@@ -186,7 +266,15 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         googleMap?.uiSettings?.isTiltGesturesEnabled = true
         googleMap?.uiSettings?.isRotateGesturesEnabled = true
 
-        drawPhaseMap(isInitial = true)
+        // Detectar si el usuario arrastra el mapa manualmente
+        googleMap?.setOnCameraMoveStartedListener { reason ->
+            if (reason == GoogleMap.OnCameraMoveStartedListener.REASON_GESTURE) {
+                isAutoFollowing = false
+                binding.btnRecenter.visibility = View.VISIBLE
+            }
+        }
+
+        fetchRealRoutePolyline()
     }
 
     private fun getDriverLatLng(): LatLng {
@@ -199,6 +287,14 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
             LatLng(pLat - 0.003, pLng - 0.003)
         } else {
             LatLng(40.7128, -74.0060)
+        }
+    }
+
+    private fun getTargetLatLng(): LatLng {
+        return if (rideStage < 2) {
+            if (pLat != 0.0 && pLng != 0.0) LatLng(pLat, pLng) else getDriverLatLng()
+        } else {
+            if (dLat != 0.0 && dLng != 0.0) LatLng(dLat, dLng) else LatLng(getDriverLatLng().latitude + 0.015, getDriverLatLng().longitude + 0.015)
         }
     }
 
@@ -222,6 +318,88 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         return ((bearing + 360) % 360).toFloat()
     }
 
+    private fun fetchRealRoutePolyline() {
+        val driver = getDriverLatLng()
+        val target = getTargetLatLng()
+
+        thread {
+            try {
+                val urlStr = "https://router.project-osrm.org/route/v1/driving/${driver.longitude},${driver.latitude};${target.longitude},${target.latitude}?overview=full&geometries=polyline&steps=true"
+                val url = URL(urlStr)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 4000
+                conn.readTimeout = 4000
+                conn.requestMethod = "GET"
+
+                if (conn.responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                    val response = StringBuilder()
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        response.append(line)
+                    }
+                    reader.close()
+
+                    val json = JSONObject(response.toString())
+                    val routes = json.optJSONArray("routes")
+                    if (routes != null && routes.length() > 0) {
+                        val route = routes.getJSONObject(0)
+                        val geometry = route.getString("geometry")
+                        val points = decodePolyline(geometry)
+                        runOnUiThread {
+                            decodedRoutePoints = points
+                            drawPhaseMap(isInitial = true)
+                        }
+                        return@thread
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ActiveRide", "Error fetching OSRM route: ${e.message}")
+            }
+
+            // Fallback de línea recta si no hay conexión OSRM
+            runOnUiThread {
+                decodedRoutePoints = listOf(driver, target)
+                drawPhaseMap(isInitial = true)
+            }
+        }
+    }
+
+    private fun decodePolyline(encoded: String): List<LatLng> {
+        val poly = ArrayList<LatLng>()
+        var index = 0
+        val len = encoded.length
+        var lat = 0
+        var lng = 0
+
+        while (index < len) {
+            var b: Int
+            var shift = 0
+            var result = 0
+            do {
+                b = encoded[index++].code - 63
+                result = result or (b and 0x1f shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
+            lat += dlat
+
+            shift = 0
+            result = 0
+            do {
+                b = encoded[index++].code - 63
+                result = result or (b and 0x1f shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
+            lng += dlng
+
+            val p = LatLng(lat.toDouble() / 1E5, lng.toDouble() / 1E5)
+            poly.add(p)
+        }
+        return poly
+    }
+
     private fun drawPhaseMap(isInitial: Boolean = false) {
         if (googleMap == null) return
 
@@ -229,6 +407,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         targetMarker?.remove()
 
         val driverPos = getDriverLatLng()
+        val targetPos = getTargetLatLng()
 
         // Marcador del auto del conductor
         if (driverMarker == null) {
@@ -242,12 +421,6 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
             driverMarker?.position = driverPos
         }
 
-        val targetPos = if (rideStage < 2) {
-            if (pLat != 0.0 && pLng != 0.0) LatLng(pLat, pLng) else driverPos
-        } else {
-            if (dLat != 0.0 && dLng != 0.0) LatLng(dLat, dLng) else LatLng(driverPos.latitude + 0.015, driverPos.longitude + 0.015)
-        }
-
         val markerTitle = if (rideStage < 2) "Punto de Recogida ($passengerName)" else "Destino ($destinationAddress)"
         val markerColor = if (rideStage < 2) BitmapDescriptorFactory.HUE_GREEN else BitmapDescriptorFactory.HUE_RED
 
@@ -258,36 +431,84 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
                 .icon(BitmapDescriptorFactory.defaultMarker(markerColor))
         )
 
-        // Trazar línea de ruta
+        // Dibujar trazado real por calles
         val routeColor = if (rideStage < 2) Color.parseColor("#2563EB") else Color.parseColor("#10B981")
-        currentRoutePolyline = googleMap?.addPolyline(
-            PolylineOptions()
-                .add(driverPos, targetPos)
-                .width(14f)
-                .color(routeColor)
-                .geodesic(true)
-        )
+        val polyOptions = PolylineOptions()
+            .width(16f)
+            .color(routeColor)
+            .geodesic(true)
 
-        // CÁMARA 3D EN PERSPECTIVA VEHICULAR (Uber / Google Maps Mode)
-        val bearing = calculateBearing(driverPos, targetPos)
-        val cameraPosition = CameraPosition.Builder()
-            .target(driverPos)
-            .zoom(17.8f)
-            .tilt(55f) // Perspectiva 3D hacia adelante
-            .bearing(bearing) // Girar mapa hacia el destino
-            .build()
-
-        if (isInitial) {
-            googleMap?.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+        if (decodedRoutePoints.isNotEmpty()) {
+            polyOptions.addAll(decodedRoutePoints)
         } else {
-            googleMap?.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1200, null)
+            polyOptions.add(driverPos, targetPos)
+        }
+        currentRoutePolyline = googleMap?.addPolyline(polyOptions)
+
+        applyCameraForCurrentMode(isSmooth = !isInitial)
+    }
+
+    private fun applyCameraForCurrentMode(isSmooth: Boolean) {
+        if (googleMap == null || !isAutoFollowing) return
+
+        val driverPos = getDriverLatLng()
+        val targetPos = getTargetLatLng()
+        val bearing = calculateBearing(driverPos, targetPos)
+
+        when (cameraMode) {
+            0 -> {
+                // 3D CONDUCCIÓN VEHICULAR (Uber Heading-Up)
+                val cameraPosition = CameraPosition.Builder()
+                    .target(driverPos)
+                    .zoom(18.2f)
+                    .tilt(58f) // Perspectiva 3D hacia adelante
+                    .bearing(bearing)
+                    .build()
+
+                if (isSmooth) {
+                    googleMap?.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1000, null)
+                } else {
+                    googleMap?.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+                }
+            }
+            1 -> {
+                // 2D CENITAL CON RUMBO
+                val cameraPosition = CameraPosition.Builder()
+                    .target(driverPos)
+                    .zoom(17.5f)
+                    .tilt(0f)
+                    .bearing(bearing)
+                    .build()
+
+                if (isSmooth) {
+                    googleMap?.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1000, null)
+                } else {
+                    googleMap?.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+                }
+            }
+            2 -> {
+                // VISTA GENERAL DE RUTA (Abarca origen y destino)
+                val builder = LatLngBounds.Builder()
+                builder.include(driverPos)
+                builder.include(targetPos)
+                if (decodedRoutePoints.isNotEmpty()) {
+                    decodedRoutePoints.forEach { builder.include(it) }
+                }
+                try {
+                    val bounds = builder.build()
+                    val cu = CameraUpdateFactory.newLatLngBounds(bounds, 180)
+                    if (isSmooth) googleMap?.animateCamera(cu, 1000, null) else googleMap?.moveCamera(cu)
+                } catch (e: Exception) {
+                    googleMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(driverPos, 15f))
+                }
+            }
         }
     }
 
     private fun startNavigationUpdates() {
         navHandler.postDelayed(object : Runnable {
             override fun run() {
-                if (!isTracking || isFinishing) return
+                if (isFinishing) return
 
                 val targetLat = if (rideStage < 2) pLat else dLat
                 val targetLng = if (rideStage < 2) pLng else dLng
@@ -295,7 +516,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
                 if (targetLat != 0.0 && targetLng != 0.0) {
                     val dist = calculateDistanceInMeters(targetLat, targetLng)
                     val distFormatted = if (dist >= 1000) {
-                        String.format(java.util.Locale.US, "%.1f km", dist / 1000f)
+                        String.format(Locale.US, "%.1f km", dist / 1000f)
                     } else {
                         "${dist.toInt()} m"
                     }
@@ -303,20 +524,33 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
                     if (rideStage == 0) {
                         binding.tvGpsProximity.text = "📍 GPS: A $distFormatted del punto de recogida (Requiere < 250m)"
                         binding.tvGpsProximity.setTextColor(if (dist <= 250f) Color.parseColor("#22C55E") else Color.parseColor("#EF4444"))
-                        binding.tvNavNextInstruction.text = "En $distFormatted avanza hacia la recogida"
+                        binding.tvNavNextInstruction.text = "En $distFormatted dirígete a la recogida"
                         binding.tvNavETA.text = "${maxOf(1, (dist / 400).toInt())} min"
+
+                        if (dist <= 120f) {
+                            speakVoiceInstruction("Aproximándose al punto de recogida. Pasajero cerca.")
+                        }
                     } else if (rideStage == 1) {
                         binding.tvGpsProximity.text = "📍 GPS: En punto de encuentro. Esperando al pasajero."
                         binding.tvGpsProximity.setTextColor(Color.parseColor("#22C55E"))
+                        binding.tvNavNextInstruction.text = "Punto de encuentro alcanzado"
+                        binding.tvNavETA.text = "0 min"
                     } else if (rideStage == 2) {
                         binding.tvGpsProximity.text = "📍 GPS: A $distFormatted del destino final"
                         binding.tvGpsProximity.setTextColor(if (dist <= 350f) Color.parseColor("#22C55E") else Color.parseColor("#2563EB"))
-                        binding.tvNavNextInstruction.text = "En $distFormatted avanza hacia el destino"
+                        binding.tvNavNextInstruction.text = "En $distFormatted continúe hacia el destino"
                         binding.tvNavETA.text = "${maxOf(1, (dist / 500).toInt())} min"
+
+                        if (dist <= 150f) {
+                            speakVoiceInstruction("Aproximándose al destino final. Prepárese para finalizar el viaje.")
+                        }
                     }
                 }
 
-                drawPhaseMap(isInitial = false)
+                if (isAutoFollowing) {
+                    drawPhaseMap(isInitial = false)
+                }
+
                 navHandler.postDelayed(this, 3000)
             }
         }, 3000)
@@ -341,7 +575,6 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
             }
             advanceStage()
         } else if (rideStage == 1) {
-            // Pasajero a bordo
             advanceStage()
         } else if (rideStage == 2) {
             // VALIDACIÓN GEOFENCE DE FINALIZACIÓN
@@ -369,37 +602,18 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         if (rideStage == 1) {
             notifyServerStage("ride:arrived_at_pickup")
             updateUiStage()
-            drawPhaseMap()
+            speakVoiceInstruction("Ha llegado al punto de encuentro. Notificando al pasajero.")
+            fetchRealRoutePolyline()
             Toast.makeText(this, "¡Llegada notificada al pasajero!", Toast.LENGTH_SHORT).show()
         } else if (rideStage == 2) {
             notifyServerStage("ride:picked_up")
+            speakVoiceInstruction("Pasajero a bordo. Iniciando ruta al destino.")
             Toast.makeText(this, "¡Pasajero a bordo! Rumbo al destino", Toast.LENGTH_SHORT).show()
             updateUiStage()
-            drawPhaseMap()
+            fetchRealRoutePolyline()
         } else if (rideStage > 2) {
+            speakVoiceInstruction("Viaje finalizado con éxito. Tarifa registrada.")
             completeRide()
-        }
-    }
-
-    private fun launchExternalNavigation() {
-        val targetLat = if (rideStage < 2) pLat else dLat
-        val targetLng = if (rideStage < 2) pLng else dLng
-        val label = if (rideStage < 2) pickupAddress else destinationAddress
-
-        if (targetLat == 0.0 || targetLng == 0.0) {
-            Toast.makeText(this, "Coordenadas no disponibles para navegación", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        try {
-            val navUri = Uri.parse("google.navigation:q=$targetLat,$targetLng&mode=d")
-            val mapIntent = Intent(Intent.ACTION_VIEW, navUri).apply {
-                setPackage("com.google.android.apps.maps")
-            }
-            startActivity(mapIntent)
-        } catch (e: Exception) {
-            val fallbackUri = Uri.parse("geo:$targetLat,$targetLng?q=$targetLat,$targetLng($label)")
-            startActivity(Intent(Intent.ACTION_VIEW, fallbackUri))
         }
     }
 
@@ -473,6 +687,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
                 } catch (e: Exception) {
                     Log.e("ActiveRide", "Error cancelling ride", e)
                 }
+                speakVoiceInstruction("Viaje cancelado.")
                 Toast.makeText(this, "Viaje cancelado. La central ha sido notificada.", Toast.LENGTH_LONG).show()
                 finish()
             }
@@ -514,8 +729,9 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
 
     override fun onDestroy() {
         super.onDestroy()
-        isTracking = false
         navHandler.removeCallbacksAndMessages(null)
+        tts?.stop()
+        tts?.shutdown()
         socket?.disconnect()
     }
 }

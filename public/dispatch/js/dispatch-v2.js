@@ -1169,7 +1169,7 @@ function renderDriversList() {
         const shortId = (driver.driverId || driver.id || '').slice(0, 8);
 
         return `
-        <div class="driver-item" onclick="window.focusDriver('${driverKey}')" style="cursor: pointer; background: #18181b; border: 1px solid #27272a; padding: 10px; margin-bottom: 8px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; transition: border-color 0.2s;">
+        <div class="driver-item" data-driver-key="${driverKey}" style="cursor: pointer; background: #18181b; border: 1px solid #27272a; padding: 10px; margin-bottom: 8px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; transition: border-color 0.2s;">
             <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
                 <div class="driver-avatar" style="width: 36px; height: 36px; border-radius: 50%; background: #27272a; border: 2px solid ${dotColor}; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; flex-shrink: 0;">
                     ${getInitials(driver.name)}
@@ -1190,7 +1190,7 @@ function renderDriversList() {
                 </div>
             </div>
             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: 8px; flex-shrink: 0;">
-                <button type="button" onclick="event.stopPropagation(); window.selectDriverForJob('${driverKey}')" title="Asignar a nueva carrera" style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: bold; cursor: pointer;">
+                <button type="button" class="btn-assign-job" data-driver-key="${driverKey}" title="Asignar a nueva carrera" style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: bold; cursor: pointer;">
                     Asignar
                 </button>
             </div>
@@ -1198,6 +1198,21 @@ function renderDriversList() {
     `}).join('');
 
     listEl.innerHTML = pendingHtml + activeHtml;
+
+    listEl.querySelectorAll('.btn-assign-job').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const key = btn.dataset.driverKey;
+            if (key) window.selectDriverForJob(key);
+        });
+    });
+
+    listEl.querySelectorAll('.driver-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const key = item.dataset.driverKey;
+            if (key) window.focusDriver(key);
+        });
+    });
 
     if (state.pendingDrivers.length === 0 && state.drivers.length === 0) {
         listEl.innerHTML = '<div class="empty-state"><p style="color:#71717a; font-size:12px; text-align:center; padding:12px;">No hay taxistas registrados</p></div>';

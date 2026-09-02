@@ -896,7 +896,9 @@ function updateDriverMarker(driver) {
     const pos = driver.location || { lat: 0, lng: 0 };
     const hasValidCoords = typeof pos.lat === 'number' && typeof pos.lng === 'number' && (pos.lat !== 0 || pos.lng !== 0);
 
-    if (!hasValidCoords) {
+    // Si el conductor está desconectado/offline, quitar el marcador del mapa
+    const isOffline = driver.isOnline === false || driver.status === 'offline';
+    if (!hasValidCoords || isOffline) {
         if (marker) {
             marker.setMap(null);
             state.markers.drivers.delete(driverKey);

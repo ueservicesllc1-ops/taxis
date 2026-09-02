@@ -2395,6 +2395,25 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('ride:inactivity_warning', (data) => {
+    try {
+      const rideId = data?.rideId;
+      const level = data?.warningLevel || 1;
+      const sec = data?.secondsStationary || 0;
+      logger.warn(`⏳ Alerta de inactividad de conductor (Nivel ${level}) para carrera ${rideId}: Vehículo detenido por ${sec}s.`);
+      io.emit('ride:inactivity_alert', {
+        rideId,
+        driverId: socket._driverUid || socket.id,
+        driverName: socket.user?.name || 'Conductor',
+        warningLevel: level,
+        secondsStationary: sec,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err) {
+      logger.error('Error handling ride:inactivity_warning:', err);
+    }
+  });
+
   // ============================================
   // DESCONEXIÓN Y RECONEXIÓN
   // ============================================

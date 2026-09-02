@@ -85,6 +85,12 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
     private var offRouteWarningLevel = 0 // 0: Normal, 1: Desvío inicial (>300m), 2: Desvío crítico (>500m), 3: Cancelado (>750m)
     private var lastOffRouteWarningTimestamp = 0L
 
+    // ALGORITMO DE DETECCIÓN DE INACTIVIDAD / FALTA DE MOVIMIENTO
+    private var lastRecordedMovementLatLng: LatLng? = null
+    private var stationaryDurationSeconds = 0
+    private var inactivityWarningLevel = 0 // 0: Normal, 1: 80s detenido, 2: 160s detenido, 3: 240s detenido -> cancelado
+    private var lastInactivityWarningTimestamp = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityActiveRideBinding.inflate(layoutInflater)
@@ -570,8 +576,9 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
                         }
                     }
 
-                    // EJECUTAR AUDITORÍA DE DESVÍO DE RUTA (ALGORITMO DE SEGURIDAD)
+                    // EJECUTAR AUDITORÍAS DE SEGURIDAD (DESVÍO E INACTIVIDAD)
                     checkRouteDeviation(driverPos)
+                    checkVehicleInactivity(driverPos)
                 }
 
                 if (isAutoFollowing) {
@@ -581,6 +588,115 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
                 navHandler.postDelayed(this, 3000)
             }
         }, 3000)
+    }
+
+    private fun checkVehicleInactivity(driverPos: LatLng) {
+        // En etapa 1 (esperando al pasajero en el punto de encuentro), es normal estar detenido
+        if (rideStage == 1) {
+            stationaryDurationSeconds = 0
+            inactivityWarningLevel = 0
+            return
+        }
+
+        if (lastRecordedMovementLatLng == null) {
+            lastRecordedMovementLatLng = driverPos
+            return
+        }
+
+        val results = FloatArray(1)
+        Location.distanceBetween(
+            lastRecordedMovementLatLng!!.latitude,
+            lastRecordedMovementLatLng!!.longitude,
+            driverPos.latitude,
+            driverPos.longitude,
+            results
+        )
+        val distanceMoved = results[0]
+
+        if (distanceMoved > 25f) {
+            // El vehículo se está desplazando activamente
+            lastRecordedMovementLatLng = driverPos
+            if (stationaryDurationSeconds > 0) {
+                stationaryDurationSeconds = 0
+                inactivityWarningLevel = 0
+                binding.bannerNavigation.setCardBackgroundColor(Color.parseColor("#000000"))
+            }
+            return
+        }
+
+        // El vehículo permanece detenido (< 25m)
+        stationaryDurationSeconds += 3
+        val now = System.currentTimeMillis()
+
+        if (stationaryDurationSeconds >= 240 && inactivityWarningLevel >= 2) { // 4 minutos detenido
+            // NIVEL 3: INACTIVIDAD PROLONGADA -> CANCELACIÓN AUTOMÁTICA
+            inactivityWarningLevel = 3
+            triggerAutoCancelDueToInactivity()
+        } else if (stationaryDurationSeconds >= 160 && (inactivityWarningLevel < 2 || (now - lastInactivityWarningTimestamp > 25000L))) {
+            // NIVEL 2: SEGUNDA ADVERTENCIA (~2.5 min)
+            inactivityWarningLevel = 2
+            lastInactivityWarningTimestamp = now
+            emitInactivityWarning(2, stationaryDurationSeconds)
+
+            binding.bannerNavigation.setCardBackgroundColor(Color.parseColor("#DC2626")) // Rojo
+            binding.tvNavNextInstruction.text = "🚨 Advertencia 2/3: Vehículo Detenido (${stationaryDurationSeconds / 60} min)"
+            binding.tvNavStreetName.text = "Inicia la marcha o el viaje se cancelará en 1 min"
+            speakVoiceInstruction("Segunda advertencia. Tu vehículo continúa sin movimiento. Si no inicias la marcha en un minuto, la carrera será cancelada.")
+        } else if (stationaryDurationSeconds >= 80 && (inactivityWarningLevel < 1 || (now - lastInactivityWarningTimestamp > 25000L))) {
+            // NIVEL 1: PRIMERA ADVERTENCIA (~1.3 min)
+            inactivityWarningLevel = 1
+            lastInactivityWarningTimestamp = now
+            emitInactivityWarning(1, stationaryDurationSeconds)
+
+            binding.bannerNavigation.setCardBackgroundColor(Color.parseColor("#D97706")) // Ámbar
+            binding.tvNavNextInstruction.text = "⚠️ Advertencia 1/3: Sin Movimiento (${stationaryDurationSeconds / 60} min)"
+            binding.tvNavStreetName.text = "Por favor inicia la marcha hacia el punto acordado"
+            speakVoiceInstruction("Atención: No detectamos movimiento en tu vehículo. Por favor inicia la marcha.")
+        }
+    }
+
+    private fun emitInactivityWarning(level: Int, secondsStationary: Int) {
+        try {
+            val json = JSONObject().apply {
+                put("rideId", rideId)
+                put("warningLevel", level)
+                put("secondsStationary", secondsStationary)
+                put("timestamp", System.currentTimeMillis())
+            }
+            socket?.emit("ride:inactivity_warning", json)
+        } catch (e: Exception) {
+            Log.e("ActiveRide", "Error emitting inactivity warning", e)
+        }
+    }
+
+    private fun triggerAutoCancelDueToInactivity() {
+        val reason = "Cancelación automática por inactividad del conductor (> 4 min sin iniciar movimiento)"
+        speakVoiceInstruction("Carrera cancelada por inactividad prolongada del vehículo. Central notificada.")
+
+        try {
+            val prefs = getSharedPreferences("driver_prefs", Context.MODE_PRIVATE)
+            val driverName = prefs.getString("driver_full_name", "Conductor")
+            val json = JSONObject().apply {
+                put("rideId", rideId)
+                put("driverId", driverName)
+                put("reason", reason)
+                put("autoCancelled", true)
+                put("timestamp", System.currentTimeMillis())
+            }
+            socket?.emit("ride:cancel", json)
+            clearActiveRideState()
+        } catch (e: Exception) {
+            Log.e("ActiveRide", "Error in auto-cancel inactivity", e)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("🚫 Carrera Cancelada por Inactividad")
+            .setMessage("Tu vehículo ha permanecido detenido por más de 4 minutos sin iniciar el recorrido hacia el punto acordado.\n\nPor protocolo de eficiencia y calidad de servicio al pasajero, la carrera ha sido liberada y reasignada a la red.")
+            .setCancelable(false)
+            .setPositiveButton("Entendido") { _, _ ->
+                finish()
+            }
+            .show()
     }
 
     private fun checkRouteDeviation(driverPos: LatLng) {

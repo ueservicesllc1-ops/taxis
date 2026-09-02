@@ -2287,19 +2287,31 @@ io.on('connection', (socket) => {
           timestamp: new Date().toISOString()
         });
 
-        rides.set(rideId, ride);
-        saveRidesToDisk();
+        // Registrar al conductor en la lista de exclusión para que JAMÁS vuelva a recibir esta carrera
+        ride.rejectedDrivers = ride.rejectedDrivers || [];
+        const driverUid = socket._driverUid || socket.user?.uid;
+        if (socket.id && !ride.rejectedDrivers.includes(socket.id)) ride.rejectedDrivers.push(socket.id);
+        if (driverUid && !ride.rejectedDrivers.includes(driverUid)) ride.rejectedDrivers.push(driverUid);
 
         // Liberar al conductor si estaba asignado
-        const driverToFree = (ride.driverId ? drivers.get(ride.driverId) : null) || drivers.get(socket.id);
+        const driverToFree = (ride.driverId ? drivers.get(ride.driverId) : null) || (driverUid ? drivers.get(driverUid) : null) || drivers.get(socket.id);
         if (driverToFree) {
+          if (driverToFree.id && !ride.rejectedDrivers.includes(driverToFree.id)) ride.rejectedDrivers.push(driverToFree.id);
+          if (driverToFree.driverId && !ride.rejectedDrivers.includes(driverToFree.driverId)) ride.rejectedDrivers.push(driverToFree.driverId);
+          if (driverToFree.userId && !ride.rejectedDrivers.includes(driverToFree.userId)) ride.rejectedDrivers.push(driverToFree.userId);
+
           driverToFree.available = true;
           driverToFree.currentRide = null;
           drivers.set(driverToFree.id, driverToFree);
+          if (driverUid) drivers.set(driverUid, driverToFree);
           io.to(driverToFree.id).emit('ride:cancelled', ride);
+          if (driverUid) io.to(driverUid).emit('ride:cancelled', ride);
           io.emit('driver:online', driverToFree);
-          io.emit('driver:status_change', { driverId: driverToFree.id, status: 'available', available: true });
+          io.emit('driver:status_change', { driverId: driverUid || driverToFree.id, status: 'available', available: true });
         }
+
+        rides.set(rideId, ride);
+        saveRidesToDisk();
 
         // Registrar viaje cancelado con $0.00 en historial si no existe registro
         const existingEarning = Array.from(earnings.values()).find(e => e.rideId === ride.id);
@@ -2536,10 +2548,14 @@ function reassignNextAvailableDriver(ride) {
 
   const excluded = new Set([...ride.rejectedDrivers, ...ride.expiredDrivers]);
 
-  // Candidatos: conductores online y disponibles que no hayan rechazado ni expirado
+  // Candidatos: conductores online y disponibles que no hayan rechazado, cancelado ni expirado
   const availableCandidates = [];
   drivers.forEach((driver) => {
-    if (driver.isOnline && driver.available && !excluded.has(driver.id) && !excluded.has(driver.driverId) && !excluded.has(driver.userId)) {
+    const isExcluded = excluded.has(driver.id) ||
+                       excluded.has(driver.driverId) ||
+                       excluded.has(driver.userId) ||
+                       (driver.socketId && excluded.has(driver.socketId));
+    if (driver.isOnline && driver.available && !isExcluded) {
       availableCandidates.push(driver);
     }
   });

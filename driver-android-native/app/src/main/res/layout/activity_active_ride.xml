@@ -77,6 +77,47 @@
         </LinearLayout>
     </androidx.cardview.widget.CardView>
 
+    <!-- Floating External Navigation Button (Google Maps / Waze) -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/btnNavigateExternal"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        app:cardCornerRadius="24dp"
+        app:cardBackgroundColor="#22C55E"
+        app:cardElevation="8dp"
+        android:clickable="true"
+        android:focusable="true"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/rideActionCard">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="18dp">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_navigation"
+                app:tint="#FFFFFF"
+                android:contentDescription="Navegar" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="NAVEGAR CON MAPS"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
     <!-- Bottom Sheet Card with Passenger & Ride Details -->
     <LinearLayout
         android:id="@+id/rideActionCard"
@@ -229,6 +270,17 @@
                 android:textColor="#0F172A"
                 android:textSize="16sp"
                 android:textStyle="bold" />
+
+            <!-- Proximity Geofence Indicator -->
+            <TextView
+                android:id="@+id/tvGpsProximity"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="📍 GPS: Verificando proximidad..."
+                android:textColor="#2563EB"
+                android:textSize="13sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <!-- Main State Action Button (Uber Slide/Click Button) -->
@@ -236,7 +288,7 @@
             android:id="@+id/btnRideAction"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:layout_marginTop="18dp"
+            android:layout_marginTop="16dp"
             app:cardCornerRadius="28dp"
             app:cardBackgroundColor="#276EF1"
             app:cardElevation="4dp"

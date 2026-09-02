@@ -10,12 +10,14 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.MapStyleOptions
@@ -24,11 +26,14 @@ import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.Polyline
 import com.google.android.gms.maps.model.PolylineOptions
 import com.taxipro.driver.R
+import com.taxipro.driver.config.AppConfig
 import com.taxipro.driver.databinding.ActivityActiveRideBinding
 import io.socket.client.IO
 import io.socket.client.Socket
 import org.json.JSONObject
-import java.util.Locale
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -37,7 +42,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
     private var socket: Socket? = null
 
     // 0: En camino a recoger, 1: En punto de encuentro, 2: En ruta al destino
-    private var rideStage = 0 
+    private var rideStage = 0
 
     private var rideId = ""
     private var pickupAddress = ""
@@ -55,9 +60,11 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
     private var tripDistStr = ""
 
     private var driverMarker: Marker? = null
-    private var pickupMarker: Marker? = null
-    private var destMarker: Marker? = null
+    private var targetMarker: Marker? = null
     private var currentRoutePolyline: Polyline? = null
+
+    private val navHandler = Handler(Looper.getMainLooper())
+    private var isTracking = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,9 +87,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
 
         binding.tvPassengerName.text = passengerName
 
-        // Persistir viaje activo localmente para recuperación de sesión
         persistActiveRideState()
-
         setupSocket()
 
         val mapFragment = supportFragmentManager
@@ -92,11 +97,15 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         updateUiStage()
 
         binding.btnRideAction.setOnClickListener {
-            advanceStage()
+            handleStageAdvance()
         }
 
         binding.btnCancelActiveRide.setOnClickListener {
             showCancelRideDialog()
+        }
+
+        binding.btnNavigateExternal.setOnClickListener {
+            launchExternalNavigation()
         }
 
         binding.btnCallPassenger.setOnClickListener {
@@ -111,6 +120,8 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         binding.btnChatPassenger.setOnClickListener {
             Toast.makeText(this, "Chat con $passengerName disponible", Toast.LENGTH_SHORT).show()
         }
+
+        startNavigationUpdates()
     }
 
     private fun persistActiveRideState() {
@@ -139,7 +150,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         user.getIdToken(false).addOnSuccessListener { tokenResult ->
             val idToken = tokenResult.token ?: return@addOnSuccessListener
             try {
-                val serverUrl = com.taxipro.driver.config.AppConfig.getServerUrl(this)
+                val serverUrl = AppConfig.getServerUrl(this)
                 val opts = IO.Options().apply {
                     auth = mapOf("token" to idToken)
                     reconnection = true
@@ -170,10 +181,12 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        googleMap?.uiSettings?.isCompassEnabled = false
+        googleMap?.uiSettings?.isCompassEnabled = true
         googleMap?.uiSettings?.isZoomControlsEnabled = false
+        googleMap?.uiSettings?.isTiltGesturesEnabled = true
+        googleMap?.uiSettings?.isRotateGesturesEnabled = true
 
-        drawPhaseMap()
+        drawPhaseMap(isInitial = true)
     }
 
     private fun getDriverLatLng(): LatLng {
@@ -183,98 +196,170 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         return if (lat != 0.0 && lng != 0.0) {
             LatLng(lat, lng)
         } else if (pLat != 0.0 && pLng != 0.0) {
-            // Ligeramente desviado del punto de recogida si no hay GPS
-            LatLng(pLat - 0.005, pLng - 0.005)
+            LatLng(pLat - 0.003, pLng - 0.003)
         } else {
             LatLng(40.7128, -74.0060)
         }
     }
 
-    private fun drawPhaseMap() {
+    private fun calculateDistanceInMeters(targetLat: Double, targetLng: Double): Float {
+        val driver = getDriverLatLng()
+        val results = FloatArray(1)
+        Location.distanceBetween(driver.latitude, driver.longitude, targetLat, targetLng, results)
+        return results[0]
+    }
+
+    private fun calculateBearing(start: LatLng, end: LatLng): Float {
+        val startLat = Math.toRadians(start.latitude)
+        val startLng = Math.toRadians(start.longitude)
+        val endLat = Math.toRadians(end.latitude)
+        val endLng = Math.toRadians(end.longitude)
+
+        val dLng = endLng - startLng
+        val y = sin(dLng) * cos(endLat)
+        val x = cos(startLat) * sin(endLat) - sin(startLat) * cos(endLat) * cos(dLng)
+        val bearing = Math.toDegrees(atan2(y, x))
+        return ((bearing + 360) % 360).toFloat()
+    }
+
+    private fun drawPhaseMap(isInitial: Boolean = false) {
         if (googleMap == null) return
 
         currentRoutePolyline?.remove()
-        pickupMarker?.remove()
-        destMarker?.remove()
+        targetMarker?.remove()
 
         val driverPos = getDriverLatLng()
 
-        // Colocar marcador del conductor
+        // Marcador del auto del conductor
         if (driverMarker == null) {
             driverMarker = googleMap?.addMarker(
                 MarkerOptions()
                     .position(driverPos)
-                    .title("Tu ubicación")
+                    .title("Tu Taxi")
                     .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE))
             )
         } else {
             driverMarker?.position = driverPos
         }
 
-        if (rideStage < 2) {
-            // FASE 1: RUTA HACIA EL PUNTO DE RECOGIDA
-            val pickupPos = if (pLat != 0.0 && pLng != 0.0) LatLng(pLat, pLng) else driverPos
-
-            pickupMarker = googleMap?.addMarker(
-                MarkerOptions()
-                    .position(pickupPos)
-                    .title("Recoger a $passengerName")
-                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN))
-            )
-
-            // Trazar línea de ruta de recogida (Azul Uber)
-            currentRoutePolyline = googleMap?.addPolyline(
-                PolylineOptions()
-                    .add(driverPos, pickupPos)
-                    .width(12f)
-                    .color(Color.parseColor("#2563eb"))
-                    .geodesic(true)
-            )
-
-            focusBounds(listOf(driverPos, pickupPos))
-
+        val targetPos = if (rideStage < 2) {
+            if (pLat != 0.0 && pLng != 0.0) LatLng(pLat, pLng) else driverPos
         } else {
-            // FASE 2: RUTA HACIA EL DESTINO FINAL
-            val pickupPos = if (pLat != 0.0 && pLng != 0.0) LatLng(pLat, pLng) else driverPos
-            val destPos = if (dLat != 0.0 && dLng != 0.0) LatLng(dLat, dLng) else LatLng(pLat + 0.02, pLng + 0.02)
+            if (dLat != 0.0 && dLng != 0.0) LatLng(dLat, dLng) else LatLng(driverPos.latitude + 0.015, driverPos.longitude + 0.015)
+        }
 
-            destMarker = googleMap?.addMarker(
-                MarkerOptions()
-                    .position(destPos)
-                    .title("Destino: $destinationAddress")
-                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
-            )
+        val markerTitle = if (rideStage < 2) "Punto de Recogida ($passengerName)" else "Destino ($destinationAddress)"
+        val markerColor = if (rideStage < 2) BitmapDescriptorFactory.HUE_GREEN else BitmapDescriptorFactory.HUE_RED
 
-            // Trazar línea de ruta final
-            currentRoutePolyline = googleMap?.addPolyline(
-                PolylineOptions()
-                    .add(driverPos, destPos)
-                    .width(12f)
-                    .color(Color.parseColor("#10b981"))
-                    .geodesic(true)
-            )
+        targetMarker = googleMap?.addMarker(
+            MarkerOptions()
+                .position(targetPos)
+                .title(markerTitle)
+                .icon(BitmapDescriptorFactory.defaultMarker(markerColor))
+        )
 
-            focusBounds(listOf(driverPos, destPos))
+        // Trazar línea de ruta
+        val routeColor = if (rideStage < 2) Color.parseColor("#2563EB") else Color.parseColor("#10B981")
+        currentRoutePolyline = googleMap?.addPolyline(
+            PolylineOptions()
+                .add(driverPos, targetPos)
+                .width(14f)
+                .color(routeColor)
+                .geodesic(true)
+        )
+
+        // CÁMARA 3D EN PERSPECTIVA VEHICULAR (Uber / Google Maps Mode)
+        val bearing = calculateBearing(driverPos, targetPos)
+        val cameraPosition = CameraPosition.Builder()
+            .target(driverPos)
+            .zoom(17.8f)
+            .tilt(55f) // Perspectiva 3D hacia adelante
+            .bearing(bearing) // Girar mapa hacia el destino
+            .build()
+
+        if (isInitial) {
+            googleMap?.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+        } else {
+            googleMap?.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition), 1200, null)
         }
     }
 
-    private fun focusBounds(points: List<LatLng>) {
-        if (points.isEmpty() || googleMap == null) return
-        val builder = LatLngBounds.Builder()
-        var validPoints = 0
-        for (pt in points) {
-            if (pt.latitude != 0.0 || pt.longitude != 0.0) {
-                builder.include(pt)
-                validPoints++
+    private fun startNavigationUpdates() {
+        navHandler.postDelayed(object : Runnable {
+            override fun run() {
+                if (!isTracking || isFinishing) return
+
+                val targetLat = if (rideStage < 2) pLat else dLat
+                val targetLng = if (rideStage < 2) pLng else dLng
+
+                if (targetLat != 0.0 && targetLng != 0.0) {
+                    val dist = calculateDistanceInMeters(targetLat, targetLng)
+                    val distFormatted = if (dist >= 1000) {
+                        String.format(java.util.Locale.US, "%.1f km", dist / 1000f)
+                    } else {
+                        "${dist.toInt()} m"
+                    }
+
+                    if (rideStage == 0) {
+                        binding.tvGpsProximity.text = "📍 GPS: A $distFormatted del punto de recogida (Requiere < 250m)"
+                        binding.tvGpsProximity.setTextColor(if (dist <= 250f) Color.parseColor("#22C55E") else Color.parseColor("#EF4444"))
+                        binding.tvNavNextInstruction.text = "En $distFormatted avanza hacia la recogida"
+                        binding.tvNavETA.text = "${maxOf(1, (dist / 400).toInt())} min"
+                    } else if (rideStage == 1) {
+                        binding.tvGpsProximity.text = "📍 GPS: En punto de encuentro. Esperando al pasajero."
+                        binding.tvGpsProximity.setTextColor(Color.parseColor("#22C55E"))
+                    } else if (rideStage == 2) {
+                        binding.tvGpsProximity.text = "📍 GPS: A $distFormatted del destino final"
+                        binding.tvGpsProximity.setTextColor(if (dist <= 350f) Color.parseColor("#22C55E") else Color.parseColor("#2563EB"))
+                        binding.tvNavNextInstruction.text = "En $distFormatted avanza hacia el destino"
+                        binding.tvNavETA.text = "${maxOf(1, (dist / 500).toInt())} min"
+                    }
+                }
+
+                drawPhaseMap(isInitial = false)
+                navHandler.postDelayed(this, 3000)
             }
-        }
-        if (validPoints > 0) {
-            try {
-                val bounds = builder.build()
-                googleMap?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 140))
-            } catch (e: Exception) {
-                googleMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(points[0], 15f))
+        }, 3000)
+    }
+
+    private fun handleStageAdvance() {
+        if (rideStage == 0) {
+            // VALIDACIÓN GEOFENCE DE LLEGADA
+            if (pLat != 0.0 && pLng != 0.0) {
+                val dist = calculateDistanceInMeters(pLat, pLng)
+                if (dist > 250f) {
+                    AlertDialog.Builder(this)
+                        .setTitle("📍 Fuera de zona de recogida")
+                        .setMessage("Aún te encuentras a ${dist.toInt()} metros del punto de recogida.\n\nPor seguridad y fidelidad del servicio, debes aproximarte a menos de 250m para notificar al pasajero.")
+                        .setPositiveButton("Entendido", null)
+                        .setNeutralButton("Simular Llegada (Prueba)") { _, _ ->
+                            advanceStage()
+                        }
+                        .show()
+                    return
+                }
             }
+            advanceStage()
+        } else if (rideStage == 1) {
+            // Pasajero a bordo
+            advanceStage()
+        } else if (rideStage == 2) {
+            // VALIDACIÓN GEOFENCE DE FINALIZACIÓN
+            if (dLat != 0.0 && dLng != 0.0) {
+                val dist = calculateDistanceInMeters(dLat, dLng)
+                if (dist > 400f) {
+                    AlertDialog.Builder(this)
+                        .setTitle("⚠️ Destino no alcanzado")
+                        .setMessage("Aún estás a ${dist.toInt()} metros del destino acordado.\n\n¿Deseas finalizar y cobrar la carrera de todas formas o continuar el viaje?")
+                        .setPositiveButton("Finalizar y Cobrar") { _, _ ->
+                            advanceStage()
+                        }
+                        .setNegativeButton("Continuar Viaje", null)
+                        .show()
+                    return
+                }
+            }
+            advanceStage()
         }
     }
 
@@ -282,18 +367,39 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         rideStage++
 
         if (rideStage == 1) {
-            // Llegó al punto de recogida
             notifyServerStage("ride:arrived_at_pickup")
             updateUiStage()
+            drawPhaseMap()
+            Toast.makeText(this, "¡Llegada notificada al pasajero!", Toast.LENGTH_SHORT).show()
         } else if (rideStage == 2) {
-            // Pasajero a bordo -> Inicia viaje hacia destino
             notifyServerStage("ride:picked_up")
             Toast.makeText(this, "¡Pasajero a bordo! Rumbo al destino", Toast.LENGTH_SHORT).show()
             updateUiStage()
             drawPhaseMap()
         } else if (rideStage > 2) {
-            // Finalizar viaje
             completeRide()
+        }
+    }
+
+    private fun launchExternalNavigation() {
+        val targetLat = if (rideStage < 2) pLat else dLat
+        val targetLng = if (rideStage < 2) pLng else dLng
+        val label = if (rideStage < 2) pickupAddress else destinationAddress
+
+        if (targetLat == 0.0 || targetLng == 0.0) {
+            Toast.makeText(this, "Coordenadas no disponibles para navegación", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val navUri = Uri.parse("google.navigation:q=$targetLat,$targetLng&mode=d")
+            val mapIntent = Intent(Intent.ACTION_VIEW, navUri).apply {
+                setPackage("com.google.android.apps.maps")
+            }
+            startActivity(mapIntent)
+        } catch (e: Exception) {
+            val fallbackUri = Uri.parse("geo:$targetLat,$targetLng?q=$targetLat,$targetLng($label)")
+            startActivity(Intent(Intent.ACTION_VIEW, fallbackUri))
         }
     }
 
@@ -335,7 +441,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
         )
         var selectedReasonIndex = 0
 
-        android.app.AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("¿Por qué necesitas cancelar este viaje?")
             .setSingleChoiceItems(reasons, 0) { _, which ->
                 selectedReasonIndex = which
@@ -349,7 +455,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun confirmCancelRide(reason: String) {
-        android.app.AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("⚠️ Confirmar cancelación")
             .setMessage("¿Estás seguro de que deseas cancelar este viaje? Esta acción liberará la carrera e informará a la central de despacho.")
             .setPositiveButton("Sí, Cancelar Viaje") { _, _ ->
@@ -377,40 +483,39 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback {
     private fun updateUiStage() {
         when (rideStage) {
             0 -> {
-                // En camino a recoger al pasajero
                 binding.tvNavNextInstruction.text = "Dirígete al punto de recogida"
                 binding.tvNavStreetName.text = pickupAddress
                 binding.tvNavETA.text = pickupDistStr.split(" ")[0] + " min"
                 binding.tvCurrentStageTitle.text = "1ª PARADA: RECOGER AL PASAJERO"
                 binding.tvCurrentStageAddress.text = pickupAddress
                 binding.tvRideActionText.text = "LLEGUÉ AL PUNTO DE ENCUENTRO"
-                binding.btnRideAction.setCardBackgroundColor(Color.parseColor("#276EF1")) // Azul
+                binding.btnRideAction.setCardBackgroundColor(Color.parseColor("#276EF1"))
             }
             1 -> {
-                // En el punto de encuentro esperando al pasajero
                 binding.tvNavNextInstruction.text = "En punto de encuentro"
                 binding.tvNavStreetName.text = "Esperando que aborde $passengerName"
                 binding.tvNavETA.text = "0 min"
                 binding.tvCurrentStageTitle.text = "PASAJERO NOTIFICADO"
                 binding.tvCurrentStageAddress.text = pickupAddress
                 binding.tvRideActionText.text = "CONFIRMAR PASAJERO A BORDO"
-                binding.btnRideAction.setCardBackgroundColor(Color.parseColor("#16A34A")) // Verde
+                binding.btnRideAction.setCardBackgroundColor(Color.parseColor("#16A34A"))
             }
             2 -> {
-                // Pasajero a bordo -> En camino al destino final
                 binding.tvNavNextInstruction.text = "Rumbo al destino final"
                 binding.tvNavStreetName.text = destinationAddress
                 binding.tvNavETA.text = tripDistStr.split(" ")[0] + " min"
                 binding.tvCurrentStageTitle.text = "2ª PARADA: DESTINO FINAL"
                 binding.tvCurrentStageAddress.text = destinationAddress
                 binding.tvRideActionText.text = "FINALIZAR VIAJE ($fareAmount)"
-                binding.btnRideAction.setCardBackgroundColor(Color.parseColor("#0F172A")) // Negro Uber
+                binding.btnRideAction.setCardBackgroundColor(Color.parseColor("#0F172A"))
             }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        isTracking = false
+        navHandler.removeCallbacksAndMessages(null)
         socket?.disconnect()
     }
 }

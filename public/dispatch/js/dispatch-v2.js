@@ -279,8 +279,8 @@ function setupFirestoreListeners() {
 
             if (data.status === 'pending') {
                 state.pendingDrivers.push(data);
-            } else if (data.status === 'approved') {
-                const existing = state.drivers.find(d => d.id === doc.id || d.driverId === doc.id);
+            } else if (data.status === 'approved' || data.status === 'provisional_approved' || data.status === 'provisional' || data.provisionalApproved === true || data.isOnline === true || data.available === true) {
+                const existing = state.drivers.find(d => d.id === doc.id || d.driverId === doc.id || d.userId === doc.id);
                 if (existing) {
                     if (data.phone) existing.phone = data.phone;
                     if (data.vehicle) existing.vehicle = data.vehicle;
@@ -451,14 +451,20 @@ function setupSocketListeners() {
     socket.on('drivers:update', (driversList) => {
         if (Array.isArray(driversList)) {
             driversList.forEach(d => {
-                const existing = state.drivers.find(x => x.id === d.id || x.driverId === d.driverId);
+                const existing = state.drivers.find(x => x.id === d.id || x.driverId === d.driverId || (x.userId && (x.userId === d.userId || x.userId === d.driverId)));
                 if (existing) {
                     const lastLoc = existing.lastLocationAt;
                     Object.assign(existing, d);
-                    if (lastLoc) existing.lastLocationAt = lastLoc;
+                    existing.isOnline = d.isOnline !== undefined ? d.isOnline : true;
+                    if (d.location && typeof d.location.lat === 'number' && d.location.lat !== 0) {
+                        existing.location = d.location;
+                        existing.lastLocationAt = Date.now();
+                    } else if (lastLoc) {
+                        existing.lastLocationAt = lastLoc;
+                    }
                     updateDriverMarker(existing);
                 } else {
-                    const newD = { ...d, lastLocationAt: Date.now() };
+                    const newD = { ...d, isOnline: d.isOnline !== undefined ? d.isOnline : true, lastLocationAt: Date.now() };
                     state.drivers.push(newD);
                     updateDriverMarker(newD);
                 }

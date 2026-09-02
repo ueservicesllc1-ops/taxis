@@ -24,11 +24,13 @@ function createTestToken(payload) {
   return `${header}.${body}.${sig}`;
 }
 
-const adminToken = createTestToken({ uid: 'admin_001', role: 'admin' });
-const dispatcherToken = createTestToken({ uid: 'dispatcher_001', role: 'dispatcher' });
-const driver1Token = createTestToken({ uid: 'driver_001', role: 'driver' });
-const driver2Token = createTestToken({ uid: 'driver_002', role: 'driver' });
-const driver3Token = createTestToken({ uid: 'driver_003', role: 'driver' });
+const testRunId = Date.now();
+const adminToken = createTestToken({ uid: `admin_5d_${testRunId}`, role: 'admin' });
+const dispatcherToken = createTestToken({ uid: `dispatcher_5d_${testRunId}`, role: 'dispatcher' });
+const driver1Uid = `driver_5d_1_${testRunId}`;
+const driver2Uid = `driver_5d_2_${testRunId}`;
+const driver1Token = createTestToken({ uid: driver1Uid, role: 'driver' });
+const driver2Token = createTestToken({ uid: driver2Uid, role: 'driver' });
 
 function createAuthenticatedSocket(token) {
   return io(SERVER_URL, {
@@ -82,8 +84,8 @@ async function runPhase5DTests() {
     dispatcherSocket.emit('register:dispatcher', { name: 'Despachador Central' });
     
     driver1Socket.emit('register:driver', {
-      driverId: 'driver_001',
-      userId: 'driver_001',
+      driverId: driver1Uid,
+      userId: driver1Uid,
       name: 'Carlos Conductor 1',
       vehicle: 'Toyota Corolla',
       plate: 'TX-101',
@@ -92,8 +94,8 @@ async function runPhase5DTests() {
     });
 
     driver2Socket.emit('register:driver', {
-      driverId: 'driver_002',
-      userId: 'driver_002',
+      driverId: driver2Uid,
+      userId: driver2Uid,
       name: 'Ana Conductora 2',
       vehicle: 'Nissan Versa',
       plate: 'TX-102',

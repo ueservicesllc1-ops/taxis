@@ -1135,6 +1135,7 @@ io.on('connection', (socket) => {
       logger.info(`Taxista conectado y autenticado: ${data.name} (Socket: ${socket.id}, UID: ${driverUid})${data.fcmToken ? ' [FCM Token OK]' : ''}${existingActiveRide ? ' [Recuperando carrera: ' + existingActiveRide.id + ']' : ''}`);
       socket.emit('registered', { type: 'driver', id: socket.id, driver, uid: driverUid });
       io.emit('driver:online', driver);
+      io.emit('drivers:update', Array.from(drivers.values()));
 
       // Si tenía una carrera en curso, sincronizar y recuperarla de inmediato en el móvil
       if (existingActiveRide) {

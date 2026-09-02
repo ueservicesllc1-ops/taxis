@@ -13,11 +13,12 @@ const testSuites = [
   { name: 'FASE 5A: Autenticación Firebase Auth', script: 'test_phase5a.js', count: 20 },
   { name: 'FASE 5B: Control de Acceso RBAC', script: 'test_phase5b.js', count: 30 },
   { name: 'FASE 5C: Seguridad Firestore Rules', script: 'test_phase5c.js', count: 30 },
-  { name: 'FASE 5D: Hardening y Sockets Móviles', script: 'test_phase5d.js', count: 15 }
+  { name: 'FASE 5D: Hardening y Sockets Móviles', script: 'test_phase5d.js', count: 15 },
+  { name: 'STORAGE: Backblaze B2 S3 Cloud', script: 'test_b2_storage.js', count: 10 }
 ];
 
 console.log('================================================================');
-console.log('EJECUCIÓN INTEGRAL DE TODAS LAS SUITES DE PRUEBA (FASES 1 A 5D)');
+console.log('EJECUCIÓN INTEGRAL DE TODAS LAS SUITES DE PRUEBA (FASES 1 A B2 STORAGE)');
 console.log('================================================================\n');
 
 const summary = [];

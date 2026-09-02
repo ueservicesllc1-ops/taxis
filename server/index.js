@@ -14,6 +14,13 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('./utils/logger');
+const multer = require('multer');
+const { uploadToB2 } = require('./utils/b2Storage');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 } // 15MB max
+});
 
 // ============================================
 // FIREBASE ADMIN SDK Y AUTENTICACIÓN (FASE 2 & FASE 5A)
@@ -561,6 +568,36 @@ app.get('/health', (req, res) => {
 // ============================================
 // API REST (FASE 5A & 5B - AUTENTICACIÓN Y RBAC)
 // ============================================
+
+// Subida segura de documentos y fotos a Backblaze B2 Cloud Storage (S3 API)
+app.post('/api/storage/upload', requireAuth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se ha proporcionado ningún archivo para subir.' });
+    }
+
+    const userId = req.user?.uid || 'anonymous';
+    const category = (req.body.category || 'doc').replace(/[^a-zA-Z0-9_-]/g, '');
+    const originalName = req.file.originalname || 'document.jpg';
+    const ext = path.extname(originalName) || '.jpg';
+    const timestamp = Date.now();
+    const key = `drivers/${userId}/${category}-${timestamp}${ext}`;
+
+    const publicUrl = await uploadToB2(req.file.buffer, key, req.file.mimetype || 'image/jpeg');
+
+    return res.status(200).json({
+      success: true,
+      url: publicUrl,
+      key,
+      category,
+      size: req.file.size
+    });
+  } catch (error) {
+    logger.error('Error en endpoint /api/storage/upload:', error);
+    return res.status(500).json({ error: 'Error al subir archivo a Backblaze B2.' });
+  }
+});
+
 app.get('/api/rides', requireAuth, requireRole('admin', 'dispatcher', 'supervisor'), (req, res) => {
   try {
     res.json(Array.from(rides.values()));

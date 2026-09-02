@@ -16,15 +16,22 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "SERVER_URL", "\"https://taxis-production-17b1.up.railway.app\"")
+        buildConfigField("String", "EMULATOR_SERVER_URL", "\"http://10.0.2.2:3000\"")
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "SERVER_URL", "\"https://taxis-production-17b1.up.railway.app\"")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            buildConfigField("String", "SERVER_URL", "\"https://taxis-production-17b1.up.railway.app\"")
         }
     }
     compileOptions {
@@ -36,6 +43,7 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
@@ -58,8 +66,8 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:32.7.2"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
-    implementation("com.google.firebase:firebase-storage-ktx")
     implementation("com.google.firebase:firebase-messaging-ktx")
+
 
     // Socket.io Java Client
     implementation("io.socket:socket.io-client:2.1.0") {

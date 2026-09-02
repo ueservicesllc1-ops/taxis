@@ -18,7 +18,6 @@ import androidx.core.content.FileProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
-import com.google.firebase.storage.FirebaseStorage
 import com.taxipro.driver.R
 import com.taxipro.driver.databinding.ActivityDriverRegistrationBinding
 import com.taxipro.driver.ui.main.MainActivity
@@ -34,7 +33,6 @@ class DriverRegistrationActivity : AppCompatActivity() {
     private lateinit var binding: ActivityDriverRegistrationBinding
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
-    private val storage = FirebaseStorage.getInstance()
 
     // Tipos de documentos
     private val DOC_SELFIE = 1
@@ -346,34 +344,95 @@ class DriverRegistrationActivity : AppCompatActivity() {
             return
         }
 
-        var completedCount = 0
+        auth.currentUser?.getIdToken(false)?.addOnSuccessListener { tokenResult ->
+            val idToken = tokenResult.token ?: ""
+            val serverUrl = com.taxipro.driver.config.AppConfig.getServerUrl(this@DriverRegistrationActivity)
+            val uploadEndpoint = "$serverUrl/api/storage/upload"
 
-        for ((name, uri) in docsToUpload) {
-            val ref = storage.reference.child("drivers/$userId/$name.jpg")
-            ref.putFile(uri)
-                .addOnSuccessListener {
-                    ref.downloadUrl.addOnSuccessListener { downloadUri ->
-                        resultUrls[name] = downloadUri.toString()
-                        completedCount++
-                        if (completedCount == docsToUpload.size) {
-                            onComplete(resultUrls)
+            Thread {
+                var completedCount = 0
+                for ((name, uri) in docsToUpload) {
+                    try {
+                        val b2Url = uploadFileToB2Endpoint(uploadEndpoint, idToken, name, uri)
+                        if (!b2Url.isNullOrEmpty()) {
+                            resultUrls[name] = b2Url
+                        } else {
+                            resultUrls[name] = uri.toString()
                         }
-                    }.addOnFailureListener {
+                    } catch (e: Exception) {
                         resultUrls[name] = uri.toString()
-                        completedCount++
-                        if (completedCount == docsToUpload.size) {
-                            onComplete(resultUrls)
-                        }
                     }
-                }
-                .addOnFailureListener {
-                    // Fallback a URI local si hay fallo de red en Firebase Storage
-                    resultUrls[name] = uri.toString()
                     completedCount++
                     if (completedCount == docsToUpload.size) {
-                        onComplete(resultUrls)
+                        runOnUiThread {
+                            onComplete(resultUrls)
+                        }
                     }
                 }
+            }.start()
+        }?.addOnFailureListener {
+            // Fallback con URIs locales si no se pudo obtener token
+            for ((name, uri) in docsToUpload) {
+                resultUrls[name] = uri.toString()
+            }
+            onComplete(resultUrls)
         }
     }
+
+    private fun uploadFileToB2Endpoint(endpointUrl: String, idToken: String, category: String, uri: Uri): String? {
+        val boundary = "Boundary-" + System.currentTimeMillis()
+        val lineEnd = "\r\n"
+        val twoHyphens = "--"
+
+        val url = java.net.URL(endpointUrl)
+        val conn = url.openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doInput = true
+        conn.doOutput = true
+        conn.useCaches = false
+        conn.connectTimeout = 30000
+        conn.readTimeout = 30000
+        conn.setRequestProperty("Connection", "Keep-Alive")
+        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+        if (idToken.isNotEmpty()) {
+            conn.setRequestProperty("Authorization", "Bearer $idToken")
+        }
+
+        val outputStream = java.io.DataOutputStream(conn.outputStream)
+
+        // 1. Campo category
+        outputStream.writeBytes(twoHyphens + boundary + lineEnd)
+        outputStream.writeBytes("Content-Disposition: form-data; name=\"category\"$lineEnd$lineEnd")
+        outputStream.writeBytes(category + lineEnd)
+
+        // 2. Campo file binario
+        val fileName = "$category-${System.currentTimeMillis()}.jpg"
+        outputStream.writeBytes(twoHyphens + boundary + lineEnd)
+        outputStream.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"$fileName\"$lineEnd")
+        outputStream.writeBytes("Content-Type: image/jpeg$lineEnd$lineEnd")
+
+        val inputStream = contentResolver.openInputStream(uri)
+        inputStream?.use { input ->
+            val buffer = ByteArray(8192)
+            var bytesRead: Int
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                outputStream.write(buffer, 0, bytesRead)
+            }
+        }
+        outputStream.writeBytes(lineEnd)
+        outputStream.writeBytes(twoHyphens + boundary + twoHyphens + lineEnd)
+        outputStream.flush()
+        outputStream.close()
+
+        val responseCode = conn.responseCode
+        if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
+            val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+            val json = org.json.JSONObject(responseText)
+            if (json.optBoolean("success", false)) {
+                return json.optString("url", null)
+            }
+        }
+        return null
+    }
 }
+

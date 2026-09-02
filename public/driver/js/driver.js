@@ -1,4 +1,4 @@
-import { auth, googleProvider, signInWithPopup, db, storage, doc, getDoc, setDoc, updateDoc, ref, uploadBytes, getDownloadURL, onAuthStateChanged } from '../../config/firebase.js';
+import { auth, googleProvider, signInWithPopup, db, doc, getDoc, setDoc, updateDoc, onAuthStateChanged } from '../../config/firebase.js';
 
 // Conexión Socket.io (usa el host actual automáticamente)
 const socket = io();
@@ -290,13 +290,27 @@ async function handleRegistration(e) {
 
         if (licenseFile) {
             try {
-                const storageRef = ref(storage, `licenses/${user.uid}/${licenseFile.name}`);
-                await uploadBytes(storageRef, licenseFile);
-                licenseUrl = await getDownloadURL(storageRef);
+                const token = await user.getIdToken();
+                const formData = new FormData();
+                formData.append('file', licenseFile);
+                formData.append('category', 'license');
+
+                const uploadRes = await fetch('/api/storage/upload', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+
+                if (uploadRes.ok) {
+                    const uploadData = await uploadRes.json();
+                    licenseUrl = uploadData.url || '';
+                } else {
+                    console.warn("Aviso: Subida de documento falló en servidor:", uploadRes.status);
+                }
             } catch (storageError) {
-                console.error("Error subiendo imagen (probablemente CORS o Permisos):", storageError);
-                // No bloqueamos el registro, solo avisamos
-                alert("Nota: La imagen no se pudo guardar por restricciones del navegador (CORS), pero tu registro continuará.");
+                console.error("Error subiendo documento a Backblaze B2:", storageError);
             }
         }
 

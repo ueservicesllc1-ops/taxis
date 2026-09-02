@@ -8,5 +8,6 @@
     <string name="welcome_driver">Bienvenido, Conductor</string>
     <string name="login_with_google">Continuar con Google</string>
     <string name="default_web_client_id_placeholder">563172013263-fa0bskpv0bvd9lhtt1crajr180o6o4jb.apps.googleusercontent.com</string>
-    <string name="server_url">http://10.0.2.2:3000</string>
+    <string name="server_url">https://taxis-production-17b1.up.railway.app</string>
+    <string name="emulator_server_url">http://10.0.2.2:3000</string>
 </resources>

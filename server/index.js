@@ -1122,31 +1122,44 @@ io.on('connection', (socket) => {
         }
       });
 
+      // Preservar FCM token si ya había un registro previo
+      const prevDriver = drivers.get(driverUid);
+      const fcmToken = data.fcmToken || prevDriver?.fcmToken || null;
+
       const driver = {
-        id: socket.id,
+        id: driverUid,          // ID estable = UID de Firebase (no cambia en reconexiones)
+        socketId: socket.id,    // Socket actual (cambia en cada reconexión)
         driverId: driverUid,
         userId: driverUid,
         name: data.name,
         vehicle: data.vehicle,
         plate: data.plate,
-        location: data.location || { lat: 0, lng: 0 },
+        location: data.location || prevDriver?.location || { lat: 0, lng: 0 },
         available: existingActiveRide ? false : true,
         currentRide: existingActiveRide ? existingActiveRide.id : null,
-        fcmToken: data.fcmToken || null,
+        fcmToken,
         isOnline: true,
         connectedAt: new Date()
       };
 
-      drivers.set(socket.id, driver);
-      logger.info(`Taxista conectado y autenticado: ${data.name} (Socket: ${socket.id}, UID: ${driverUid})${data.fcmToken ? ' [FCM Token OK]' : ''}${existingActiveRide ? ' [Recuperando carrera: ' + existingActiveRide.id + ']' : ''}`);
-      socket.emit('registered', { type: 'driver', id: socket.id, driver, uid: driverUid });
+      // Unirse a la sala de UID permanente para garantizar que ride:new siempre llegue
+      socket.join(driverUid);
+
+      // Indexar por UID estable (no por socket.id)
+      drivers.set(driverUid, driver);
+
+      // Mantener también el mapeo socket → uid para el cleanup en disconnect
+      socket._driverUid = driverUid;
+
+      logger.info(`Taxista conectado y autenticado: ${data.name} (Socket: ${socket.id}, UID: ${driverUid})${fcmToken ? ' [FCM Token OK]' : ''}${existingActiveRide ? ' [Recuperando carrera: ' + existingActiveRide.id + ']' : ''}`);
+      socket.emit('registered', { type: 'driver', id: driverUid, driver, uid: driverUid });
       io.emit('driver:online', driver);
       io.emit('drivers:update', Array.from(drivers.values()));
 
       // Si tenía una carrera en curso, sincronizar y recuperarla de inmediato en el móvil
       if (existingActiveRide) {
-        existingActiveRide.driverId = socket.id;
-        if (existingActiveRide.assignedDriver) existingActiveRide.assignedDriver.id = socket.id;
+        existingActiveRide.driverId = driverUid;
+        if (existingActiveRide.assignedDriver) existingActiveRide.assignedDriver.id = driverUid;
         rides.set(existingActiveRide.id, existingActiveRide);
         saveRidesToDisk();
         socket.emit('ride:assigned', existingActiveRide);
@@ -1160,10 +1173,12 @@ io.on('connection', (socket) => {
 
   socket.on('driver:fcm_token', ({ driverId, fcmToken }) => {
     try {
-      const driver = drivers.get(socket.id);
+      const uid = socket._driverUid || driverId;
+      const driver = (uid && drivers.get(uid)) || drivers.get(socket.id);
       if (driver && fcmToken) {
         driver.fcmToken = fcmToken;
-        drivers.set(socket.id, driver);
+        const key = driver.id || uid;
+        drivers.set(key, driver);
         logger.info(`FCM Token actualizado para ${driver.name}: ${fcmToken.slice(0, 15)}...`);
       }
     } catch (e) {
@@ -1176,7 +1191,8 @@ io.on('connection', (socket) => {
   // ============================================
   socket.on('driver:location', (location) => {
     try {
-      const driver = drivers.get(socket.id);
+      const uid = socket._driverUid;
+      const driver = (uid && drivers.get(uid)) || drivers.get(socket.id);
       if (driver) {
         // Validar coordenadas
         if (!location ||
@@ -1191,10 +1207,10 @@ io.on('connection', (socket) => {
         driver.location = location;
         driver.heading = location.heading !== undefined ? location.heading : (driver.heading || 0);
         driver.lastUpdate = new Date();
-        drivers.set(socket.id, driver);
+        drivers.set(driver.id || uid || socket.id, driver);
 
         io.emit('driver:location_update', {
-          driverId: socket.id,
+          driverId: driver.driverId || driver.userId || driver.id,
           userId: driver.driverId || driver.userId,
           name: driver.name,
           location,
@@ -1214,27 +1230,29 @@ io.on('connection', (socket) => {
   // ============================================
   socket.on('driver:availability', (data) => {
     try {
-      const driver = drivers.get(socket.id);
+      const uid = socket._driverUid;
+      const driver = (uid && drivers.get(uid)) || drivers.get(socket.id);
       if (driver) {
         driver.available = Boolean(data.available);
         driver.isOnline = Boolean(data.available);
         if (data.location) {
           driver.location = data.location;
         }
-        drivers.set(socket.id, driver);
+        const key = driver.id || uid;
+        drivers.set(key, driver);
 
         logger.info(`Driver ${driver.name} is now ${driver.available ? 'AVAILABLE' : 'OFFLINE/BUSY'}`);
 
         if (driver.available) {
           io.emit('driver:online', driver);
           io.emit('driver:status_change', {
-            driverId: socket.id,
+            driverId: driver.id,
             status: 'available',
             available: true
           });
         } else {
           io.emit('driver:status_change', {
-            driverId: socket.id,
+            driverId: driver.id,
             status: 'offline',
             available: false
           });

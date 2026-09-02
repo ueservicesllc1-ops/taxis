@@ -2310,17 +2310,36 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     logger.info(`Desconexión: ${socket.id}`);
 
-    const driver = drivers.get(socket.id);
+    // Buscar conductor por UID estable primero, luego por socket.id como fallback
+    const driverUid = socket._driverUid;
+    const driver = (driverUid && drivers.get(driverUid)) || drivers.get(socket.id);
+
     if (driver) {
       driver.isOnline = false;
-      io.emit('driver:offline', { driverId: socket.id });
+      driver.available = false;
+      const stableId = driver.id || driverUid;
+
+      // Notificar desconexión en tiempo real a la Central Web
+      io.emit('driver:offline', { driverId: stableId });
+      io.emit('driver:status_change', {
+        driverId: stableId,
+        status: 'offline',
+        available: false
+      });
 
       // Si no tiene viaje activo en curso, eliminar del Map
       if (!driver.currentRide) {
-        drivers.delete(socket.id);
+        if (driverUid) drivers.delete(driverUid);
+        if (drivers.has(socket.id)) drivers.delete(socket.id);
+        logger.info(`Conductor ${driver.name} desconectado y eliminado del mapa activo.`);
       } else {
+        // Actualizar el registro pero mantenerlo por el viaje activo
+        if (driverUid) drivers.set(driverUid, driver);
         logger.info(`Conductor ${driver.name} desconectado pero tiene viaje activo ${driver.currentRide}. Reteniendo sesión.`);
       }
+
+      // Emitir lista actualizada de conductores
+      io.emit('drivers:update', Array.from(drivers.values()));
     }
 
     dispatchers.delete(socket.id);

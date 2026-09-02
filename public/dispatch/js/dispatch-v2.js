@@ -441,16 +441,30 @@ function setupSocketListeners() {
     });
 
     socket.on('driver:offline', (data) => {
-        const driver = state.drivers.find(d => d.id === data.driverId || d.driverId === data.driverId);
-        if (driver) {
+        const offlineId = data.driverId || data.id;
+        const driverIdx = state.drivers.findIndex(d => d.id === offlineId || d.driverId === offlineId || d.userId === offlineId);
+        if (driverIdx !== -1) {
+            const driver = state.drivers[driverIdx];
             driver.isOnline = false;
             driver.available = false;
             driver.status = 'offline';
-            updateDriverMarker(driver);
-            renderDriversList();
-            updateDriverSelectOptions();
-            updateStats();
+
+            // Eliminar marcador del mapa
+            const marker = state.markers.drivers.get(driver.id) || state.markers.drivers.get(offlineId);
+            if (marker) {
+                marker.setMap(null);
+                state.markers.drivers.delete(driver.id);
+                state.markers.drivers.delete(offlineId);
+            }
+
+            // Si no tiene carrera activa, eliminar de la lista; si tiene, dejarlo pero marcarlo offline
+            if (!driver.currentRide && !driver.currentRideId) {
+                state.drivers.splice(driverIdx, 1);
+            }
         }
+        renderDriversList();
+        updateDriverSelectOptions();
+        updateStats();
     });
 
     socket.on('driver:status_change', (data) => {

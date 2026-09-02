@@ -80,6 +80,28 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         checkPermissions()
         restoreOnlineState()
         syncFcmToken()
+        setupDriverFirestoreListener()
+    }
+
+    private var driverDocListener: com.google.firebase.firestore.ListenerRegistration? = null
+
+    private fun setupDriverFirestoreListener() {
+        val uid = auth.currentUser?.uid ?: return
+        driverDocListener?.remove()
+        driverDocListener = db.collection("drivers").document(uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
+                val appStatus = snapshot.getString("approvalStatus")
+                    ?: snapshot.getString("status")
+                    ?: "provisional"
+
+                val prefs = getSharedPreferences("driver_prefs", Context.MODE_PRIVATE)
+                prefs.edit().putString("approval_status", appStatus).apply()
+
+                runOnUiThread {
+                    checkApprovalState()
+                }
+            }
     }
 
     private fun syncFcmToken() {
@@ -113,6 +135,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         restoreOnlineState()
         checkApprovalState()
         updateTodayEarningsPill()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        driverDocListener?.remove()
     }
 
     private fun updateTodayEarningsPill() {
@@ -153,20 +180,32 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         val now = System.currentTimeMillis()
 
         if (approvalStatus == "approved") {
+            binding.tvStatusText.text = if (isOnline) "Tienes conexión" else "Estás desconectado"
+            binding.tvStatusSubtext.text = if (isOnline) "Buscando carreras cercanas..." else "Cuenta Aprobada y Verificada. Presiona IR para comenzar."
+            binding.btnGoOnline.isEnabled = true
+            if (!isOnline) {
+                binding.btnGoOnline.setCardBackgroundColor(Color.parseColor("#276EF1"))
+                binding.tvGoOnlineText.text = "IR"
+            }
             return true
         }
 
         if (now > deadline) {
             // Pasaron las 24 horas sin aprobación formal -> Cuenta en pausa / suspendida
             binding.tvStatusText.text = "Revisión requerida"
-            binding.tvStatusSubtext.text = "Período provisional de 24h concluido. Esperando validación de documentos."
+            binding.tvStatusSubtext.text = "Período provisional de 24h concluido. Esperando validación de documentos por el administrador."
             binding.btnGoOnline.isEnabled = false
             binding.btnGoOnline.setCardBackgroundColor(Color.parseColor("#475569"))
             return false
         } else {
             // Dentro de las 24 horas -> PUEDE TRABAJAR
-            val hours = ((deadline - now) / (1000 * 60 * 60)).toInt()
+            val hours = Math.max(0, ((deadline - now) / (1000 * 60 * 60)).toInt())
             binding.tvStatusSubtext.text = "Aprobación provisional activa: Puedes trabajar (${hours}h restantes)"
+            binding.btnGoOnline.isEnabled = true
+            if (!isOnline) {
+                binding.btnGoOnline.setCardBackgroundColor(Color.parseColor("#276EF1"))
+                binding.tvGoOnlineText.text = "IR"
+            }
             return true
         }
     }

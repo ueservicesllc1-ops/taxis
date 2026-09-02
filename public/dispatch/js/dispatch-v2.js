@@ -1,4 +1,4 @@
-import { db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, collection, query, where, onSnapshot, doc, updateDoc } from '../../config/firebase.js';
+import { db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, collection, query, where, onSnapshot, doc, updateDoc, getDoc } from '../../config/firebase.js';
 
 // Conexión Socket.io autenticada (FASE 5A)
 export let socket = null;
@@ -157,6 +157,7 @@ function init() {
     setupEventListeners();
     setupCancelModalListeners();
     setupEditModalListeners();
+    setupDriverVerificationModal();
     initMap();
     startClock();
 
@@ -302,9 +303,11 @@ function setupFirestoreListeners() {
             data.id = doc.id;
             data.driverId = doc.id;
 
-            if (data.status === 'pending') {
+            const isPendingOrProvisional = data.status === 'pending' || data.approvalStatus === 'provisional' || data.approvalStatus === 'pending';
+            if (isPendingOrProvisional) {
                 state.pendingDrivers.push(data);
-            } else if (data.status === 'approved' || data.status === 'provisional_approved' || data.status === 'provisional' || data.provisionalApproved === true || data.isOnline === true || data.available === true) {
+            }
+            if (data.status === 'approved' || data.status === 'provisional_approved' || data.status === 'provisional' || data.provisionalApproved === true || data.isOnline === true || data.available === true) {
                 const isOnline = data.available === true || data.isOnline === true;
                 const existing = state.drivers.find(d => d.id === doc.id || d.driverId === doc.id || d.userId === doc.id);
                 if (existing) {
@@ -1191,16 +1194,30 @@ function renderDriversList() {
     const listEl = document.getElementById('driversList');
     if (!listEl) return;
 
-    const pendingHtml = state.pendingDrivers.map(driver => `
-        <div class="driver-item pending" onclick="window.viewPendingDriver('${driver.id}')" style="cursor: pointer; background: #1c1917; border-left: 3px solid #f59e0b; padding: 10px; margin-bottom: 8px; border-radius: 8px;">
-            <div class="driver-avatar" style="background: #f59e0b; color: #fff; font-weight: bold;">${getInitials(driver.name)}</div>
-            <div class="driver-info" style="flex:1; margin-left: 8px;">
-                <h4 style="color: #fff; font-size: 13px; margin: 0;">${escapeHtml(driver.name)}</h4>
-                <p style="color: #f59e0b; font-size: 11px; margin: 2px 0 0;">Solicitud de Registro Pendiente</p>
+    const pendingHtml = state.pendingDrivers.map(driver => {
+        const isProv = driver.approvalStatus === 'provisional';
+        const vText = (driver.vehicle && typeof driver.vehicle === 'object') 
+            ? `${driver.vehicle.brand || ''} ${driver.vehicle.model || ''}`.trim()
+            : (driver.vehicle || 'Vehículo Taxi');
+        const pText = driver.plate || (driver.vehicle && driver.vehicle.plate) || 'Sin placa';
+
+        return `
+        <div class="driver-item pending" onclick="window.viewPendingDriver('${driver.id}')" style="cursor: pointer; background: #1c1917; border-left: 3px solid #f59e0b; padding: 10px; margin-bottom: 8px; border-radius: 8px; transition: background 0.2s;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <div class="driver-avatar" style="background: #f59e0b; color: #fff; font-weight: bold;">${getInitials(driver.name)}</div>
+                <div class="driver-info" style="flex:1;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h4 style="color: #fff; font-size: 13px; margin: 0;">${escapeHtml(driver.name)}</h4>
+                        <span style="font-size:9px; font-weight:700; color:#f59e0b; background:#f59e0b20; border:1px solid #f59e0b40; padding:1px 5px; border-radius:6px;">${isProv ? 'REVISIÓN 24H' : 'NUEVO'}</span>
+                    </div>
+                    <p style="color: #cbd5e1; font-size: 11px; margin: 2px 0 0;">${escapeHtml(vText)} • <strong style="color:#f59e0b;">${escapeHtml(pText)}</strong></p>
+                    <p style="color: #38bdf8; font-size: 10px; margin: 3px 0 0; font-weight:600;">👉 Clic para revisar y activar conductor</p>
+                </div>
+                <i data-lucide="chevron-right" style="color: #9ca3af; width: 16px; height: 16px;"></i>
             </div>
-            <i data-lucide="chevron-right" style="color: #9ca3af; width: 16px; height: 16px;"></i>
         </div>
-    `).join('');
+        `;
+    }).join('');
 
     const now = Date.now();
     const activeHtml = state.drivers.map(driver => {
@@ -2617,6 +2634,231 @@ function showToast(title, message) {
 
 function getInitials(name) { return name ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'TX'; }
 function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text || ''; return div.innerHTML; }
+
+// 8. Modal de Verificación y Aprobación de Conductores (ADMIN)
+function setupDriverVerificationModal() {
+    const modal = document.getElementById('driverVerificationModal');
+    if (!modal) return;
+
+    const detailsEl = document.getElementById('verificationDetails');
+    const approveBtn = modal.querySelector('.approve-driver');
+    const rejectBtn = modal.querySelector('.reject-driver');
+    const closeBtn = modal.querySelector('.close-modal');
+
+    let currentDriver = null;
+
+    window.viewPendingDriver = async function(driverId) {
+        let driver = state.pendingDrivers.find(d => d.id === driverId || d.driverId === driverId) 
+                  || state.drivers.find(d => d.id === driverId || d.driverId === driverId);
+
+        if (!driver) {
+            try {
+                const docSnap = await getDoc(doc(db, "drivers", driverId));
+                if (docSnap.exists()) {
+                    driver = { id: docSnap.id, ...docSnap.data() };
+                }
+            } catch (e) {
+                console.warn("Error buscando conductor en Firestore:", e);
+            }
+        }
+
+        if (!driver) {
+            showToast("Error", "No se encontró la información del conductor.");
+            return;
+        }
+
+        currentDriver = driver;
+
+        const isProvisional = driver.approvalStatus === 'provisional';
+        const registeredAt = driver.registeredAt || driver.createdAt;
+        let registeredDateStr = 'Reciente';
+        if (registeredAt) {
+            registeredDateStr = new Date(registeredAt).toLocaleString();
+        }
+
+        // Documentos subidos
+        const docs = driver.documents || {};
+        const selfieUrl = docs.selfie || driver.selfieUrl || driver.selfie_url || '';
+        const licenseUrl = docs.license || docs.licenseUrl || driver.licenseUrl || driver.license_url || '';
+        const insuranceUrl = docs.insurance || driver.insuranceUrl || driver.insurance_url || '';
+        const regUrl = docs.registration || driver.registrationUrl || driver.registration_url || '';
+
+        let docsHtml = '';
+        const docItems = [
+            { label: 'Foto / Selfie', url: selfieUrl },
+            { label: 'Licencia de Conducir', url: licenseUrl },
+            { label: 'Póliza de Seguro', url: insuranceUrl },
+            { label: 'Registración del Vehículo', url: regUrl }
+        ];
+
+        docItems.forEach(item => {
+            if (item.url) {
+                docsHtml += `
+                    <div style="background:#27272a; padding:10px; border-radius:8px; display:flex; flex-direction:column; gap:6px;">
+                        <span style="font-size:11px; font-weight:700; color:#cbd5e1;">${item.label}</span>
+                        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" style="color:#38bdf8; font-size:12px; display:flex; align-items:center; gap:4px; text-decoration:none;">
+                            <span>👁️ Ver Documento</span>
+                        </a>
+                        ${item.url.match(/\.(jpeg|jpg|png|webp)($|\?)/i) ? `
+                            <img src="${escapeHtml(item.url)}" alt="${item.label}" style="width:100%; max-height:120px; object-fit:cover; border-radius:6px; border:1px solid #3f3f46; margin-top:4px;" />
+                        ` : ''}
+                    </div>
+                `;
+            } else {
+                docsHtml += `
+                    <div style="background:#27272a40; border:1px dashed #3f3f46; padding:10px; border-radius:8px; display:flex; flex-direction:column; gap:4px;">
+                        <span style="font-size:11px; font-weight:700; color:#71717a;">${item.label}</span>
+                        <span style="font-size:11px; color:#9ca3af;">No adjuntado</span>
+                    </div>
+                `;
+            }
+        });
+
+        let vehicleText = 'Vehículo Taxi';
+        if (driver.vehicle && typeof driver.vehicle === 'object') {
+            vehicleText = `${driver.vehicle.brand || ''} ${driver.vehicle.model || ''} ${driver.vehicle.year || ''}`.trim();
+        } else if (typeof driver.vehicle === 'string') {
+            vehicleText = driver.vehicle;
+        }
+
+        const plateText = driver.plate || (driver.vehicle && driver.vehicle.plate) || 'N/A';
+
+        detailsEl.innerHTML = `
+            <div style="display:flex; flex-direction:column; gap:14px;">
+                <div style="display:flex; align-items:center; gap:12px; background:#27272a; padding:12px; border-radius:8px; border:1px solid #3f3f46;">
+                    <div style="width:48px; height:48px; border-radius:50%; background:#f59e0b; color:#fff; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:bold;">
+                        ${getInitials(driver.name)}
+                    </div>
+                    <div style="flex:1;">
+                        <h4 style="margin:0; color:#f4f4f5; font-size:15px; font-weight:700;">${escapeHtml(driver.name)}</h4>
+                        <p style="margin:2px 0 0; color:#a1a1aa; font-size:12px;">📞 ${escapeHtml(driver.phone || 'Sin teléfono')} • ✉️ ${escapeHtml(driver.email || 'Sin email')}</p>
+                        <p style="margin:2px 0 0; color:#94a3b8; font-size:11px;">Registrado: ${registeredDateStr}</p>
+                    </div>
+                    <span style="background:${isProvisional ? '#f59e0b20' : '#3b82f620'}; color:${isProvisional ? '#f59e0b' : '#3b82f6'}; border:1px solid ${isProvisional ? '#f59e0b' : '#3b82f6'}; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:700;">
+                        ${isProvisional ? 'Revisión Provisional (24h)' : 'Pendiente de Aprobación'}
+                    </span>
+                </div>
+
+                <div style="background:#27272a; padding:12px; border-radius:8px; border:1px solid #3f3f46;">
+                    <h5 style="margin:0 0 8px; color:#38bdf8; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">🚗 Datos del Vehículo</h5>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px;">
+                        <div><span style="color:#a1a1aa;">Modelo:</span> <strong style="color:#f4f4f5;">${escapeHtml(vehicleText)}</strong></div>
+                        <div><span style="color:#a1a1aa;">Placa:</span> <strong style="color:#f59e0b;">${escapeHtml(plateText)}</strong></div>
+                        <div><span style="color:#a1a1aa;">SSN/ITIN:</span> <strong style="color:#cbd5e1;">${escapeHtml(driver.ssnItinMasked || '***-**-****')}</strong></div>
+                        <div><span style="color:#a1a1aa;">Estado:</span> <strong style="color:${isProvisional ? '#f59e0b' : '#10b981'};">${escapeHtml(driver.approvalStatus || driver.status || 'pending')}</strong></div>
+                    </div>
+                </div>
+
+                <div style="background:#27272a; padding:12px; border-radius:8px; border:1px solid #3f3f46;">
+                    <h5 style="margin:0 0 10px; color:#38bdf8; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">📄 Documentación Adjunta</h5>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px;">
+                        ${docsHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    };
+
+    const closeModal = () => {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        currentDriver = null;
+    };
+
+    closeBtn?.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    approveBtn?.addEventListener('click', async () => {
+        if (!currentDriver) return;
+        approveBtn.disabled = true;
+        approveBtn.textContent = 'Aprobando...';
+
+        try {
+            const driverRef = doc(db, "drivers", currentDriver.id);
+            await updateDoc(driverRef, {
+                approvalStatus: 'approved',
+                status: 'approved',
+                available: true,
+                isOnline: true,
+                approvedAt: new Date().toISOString()
+            });
+
+            // Remover de pendientes en estado local
+            state.pendingDrivers = state.pendingDrivers.filter(d => d.id !== currentDriver.id);
+
+            // Actualizar en lista activa
+            let active = state.drivers.find(d => d.id === currentDriver.id);
+            if (active) {
+                active.approvalStatus = 'approved';
+                active.status = 'available';
+                active.available = true;
+                active.isOnline = true;
+            } else {
+                state.drivers.push({
+                    ...currentDriver,
+                    approvalStatus: 'approved',
+                    status: 'available',
+                    available: true,
+                    isOnline: true
+                });
+            }
+
+            renderDriversList();
+            updateDriverSelectOptions();
+            updateStats();
+
+            showToast('Conductor Aprobado', `¡${currentDriver.name} ha sido aprobado con éxito! Ya puede conectarse permanentemente.`);
+            closeModal();
+        } catch (err) {
+            console.error("Error aprobando conductor:", err);
+            alert("Error al aprobar conductor: " + err.message);
+        } finally {
+            approveBtn.disabled = false;
+            approveBtn.innerHTML = `<span>✓ Aprobar y Activar Conductor</span>`;
+        }
+    });
+
+    rejectBtn?.addEventListener('click', async () => {
+        if (!currentDriver) return;
+        if (!confirm(`¿Estás seguro de que deseas rechazar la solicitud de ${currentDriver.name}?`)) return;
+
+        rejectBtn.disabled = true;
+        rejectBtn.textContent = 'Rechazando...';
+
+        try {
+            const driverRef = doc(db, "drivers", currentDriver.id);
+            await updateDoc(driverRef, {
+                approvalStatus: 'rejected',
+                status: 'rejected',
+                available: false,
+                isOnline: false,
+                rejectedAt: new Date().toISOString()
+            });
+
+            state.pendingDrivers = state.pendingDrivers.filter(d => d.id !== currentDriver.id);
+            state.drivers = state.drivers.filter(d => d.id !== currentDriver.id);
+
+            renderDriversList();
+            updateDriverSelectOptions();
+            updateStats();
+
+            showToast('Conductor Rechazado', `La solicitud de ${currentDriver.name} fue rechazada.`);
+            closeModal();
+        } catch (err) {
+            console.error("Error rechazando conductor:", err);
+            alert("Error al rechazar conductor: " + err.message);
+        } finally {
+            rejectBtn.disabled = false;
+            rejectBtn.textContent = 'Rechazar Solicitud';
+        }
+    });
+}
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

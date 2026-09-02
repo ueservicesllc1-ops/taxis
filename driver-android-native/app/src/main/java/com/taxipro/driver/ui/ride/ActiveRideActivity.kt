@@ -32,7 +32,6 @@ import com.taxipro.driver.config.AppConfig
 import com.taxipro.driver.databinding.ActivityActiveRideBinding
 import io.socket.client.IO
 import io.socket.client.Socket
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -81,6 +80,10 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
 
     private val navHandler = Handler(Looper.getMainLooper())
     private var lastSpokenInstruction = ""
+
+    // ALGORITMO DE DETECCIÓN DE DESVÍO DE RUTA (SEGURIDAD)
+    private var offRouteWarningLevel = 0 // 0: Normal, 1: Desvío inicial (>300m), 2: Desvío crítico (>500m), 3: Cancelado (>750m)
+    private var lastOffRouteWarningTimestamp = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -305,6 +308,25 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
         return results[0]
     }
 
+    private fun getMinDistanceToRouteInMeters(driverPos: LatLng): Float {
+        if (decodedRoutePoints.isEmpty()) {
+            val target = getTargetLatLng()
+            val res = FloatArray(1)
+            Location.distanceBetween(driverPos.latitude, driverPos.longitude, target.latitude, target.longitude, res)
+            return 0f
+        }
+
+        var minDistance = Float.MAX_VALUE
+        val results = FloatArray(1)
+        for (pt in decodedRoutePoints) {
+            Location.distanceBetween(driverPos.latitude, driverPos.longitude, pt.latitude, pt.longitude, results)
+            if (results[0] < minDistance) {
+                minDistance = results[0]
+            }
+        }
+        return minDistance
+    }
+
     private fun calculateBearing(start: LatLng, end: LatLng): Float {
         val startLat = Math.toRadians(start.latitude)
         val startLng = Math.toRadians(start.longitude)
@@ -357,7 +379,7 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
                 Log.e("ActiveRide", "Error fetching OSRM route: ${e.message}")
             }
 
-            // Fallback de línea recta si no hay conexión OSRM
+            // Fallback si no hay conexión OSRM
             runOnUiThread {
                 decodedRoutePoints = listOf(driver, target)
                 drawPhaseMap(isInitial = true)
@@ -513,6 +535,8 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
                 val targetLat = if (rideStage < 2) pLat else dLat
                 val targetLng = if (rideStage < 2) pLng else dLng
 
+                val driverPos = getDriverLatLng()
+
                 if (targetLat != 0.0 && targetLng != 0.0) {
                     val dist = calculateDistanceInMeters(targetLat, targetLng)
                     val distFormatted = if (dist >= 1000) {
@@ -545,6 +569,9 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
                             speakVoiceInstruction("Aproximándose al destino final. Prepárese para finalizar el viaje.")
                         }
                     }
+
+                    // EJECUTAR AUDITORÍA DE DESVÍO DE RUTA (ALGORITMO DE SEGURIDAD)
+                    checkRouteDeviation(driverPos)
                 }
 
                 if (isAutoFollowing) {
@@ -554,6 +581,92 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
                 navHandler.postDelayed(this, 3000)
             }
         }, 3000)
+    }
+
+    private fun checkRouteDeviation(driverPos: LatLng) {
+        if (rideStage == 1 || decodedRoutePoints.isEmpty()) return
+
+        val offRouteDistance = getMinDistanceToRouteInMeters(driverPos)
+        val now = System.currentTimeMillis()
+
+        if (offRouteDistance > 300f) {
+            // Se está alejando de la ruta
+            if (offRouteDistance > 750f && offRouteWarningLevel >= 2) {
+                // NIVEL 3: DESVÍO EXTREMO -> CANCELAR AUTOMÁTICAMENTE
+                offRouteWarningLevel = 3
+                triggerAutoCancelDueToDeviation(offRouteDistance)
+            } else if (offRouteDistance > 500f && (offRouteWarningLevel < 2 || (now - lastOffRouteWarningTimestamp > 20000L))) {
+                // NIVEL 2: SEGUNDA ADVERTENCIA
+                offRouteWarningLevel = 2
+                lastOffRouteWarningTimestamp = now
+                emitOffRouteWarning(2, offRouteDistance)
+
+                binding.bannerNavigation.setCardBackgroundColor(Color.parseColor("#DC2626")) // Rojo
+                binding.tvNavNextInstruction.text = "🚨 Advertencia 2/3: Desvío Crítico (${offRouteDistance.toInt()}m)"
+                binding.tvNavStreetName.text = "Regresa a la ruta o el viaje se cancelará"
+                speakVoiceInstruction("Segunda advertencia. Continúas fuera de la ruta. Si te alejas más, el viaje se cancelará automáticamente.")
+            } else if (offRouteWarningLevel < 1 || (now - lastOffRouteWarningTimestamp > 25000L)) {
+                // NIVEL 1: PRIMERA ADVERTENCIA
+                offRouteWarningLevel = 1
+                lastOffRouteWarningTimestamp = now
+                emitOffRouteWarning(1, offRouteDistance)
+
+                binding.bannerNavigation.setCardBackgroundColor(Color.parseColor("#D97706")) // Ámbar
+                binding.tvNavNextInstruction.text = "⚠️ Advertencia 1/3: Fuera de Ruta (${offRouteDistance.toInt()}m)"
+                binding.tvNavStreetName.text = "Por favor regresa al trayecto sugerido"
+                speakVoiceInstruction("Atención: Te estás desviando de la ruta asignada. Por favor regresa a la ruta.")
+            }
+        } else if (offRouteDistance < 150f && offRouteWarningLevel > 0) {
+            // El conductor regresó a la ruta
+            offRouteWarningLevel = 0
+            binding.bannerNavigation.setCardBackgroundColor(Color.parseColor("#000000")) // Negro normal
+            speakVoiceInstruction("Has regresado a la ruta correcta.")
+        }
+    }
+
+    private fun emitOffRouteWarning(level: Int, distance: Float) {
+        try {
+            val json = JSONObject().apply {
+                put("rideId", rideId)
+                put("warningLevel", level)
+                put("distanceOffRoute", distance)
+                put("timestamp", System.currentTimeMillis())
+            }
+            socket?.emit("ride:off_route_warning", json)
+        } catch (e: Exception) {
+            Log.e("ActiveRide", "Error emitting off-route warning", e)
+        }
+    }
+
+    private fun triggerAutoCancelDueToDeviation(offDistance: Float) {
+        val reason = "Cancelación automática por desvío excesivo de ruta (${offDistance.toInt()}m fuera de ruta tras 3 advertencias)"
+        speakVoiceInstruction("Viaje cancelado automáticamente por desvío excesivo de la ruta. Central notificada.")
+
+        try {
+            val prefs = getSharedPreferences("driver_prefs", Context.MODE_PRIVATE)
+            val driverName = prefs.getString("driver_full_name", "Conductor")
+            val json = JSONObject().apply {
+                put("rideId", rideId)
+                put("driverId", driverName)
+                put("reason", reason)
+                put("autoCancelled", true)
+                put("offRouteDistance", offDistance)
+                put("timestamp", System.currentTimeMillis())
+            }
+            socket?.emit("ride:cancel", json)
+            clearActiveRideState()
+        } catch (e: Exception) {
+            Log.e("ActiveRide", "Error in auto-cancel", e)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("🚫 Viaje Cancelado por Seguridad")
+            .setMessage("Te has alejado más de ${offDistance.toInt()}m de la ruta establecida tras recibir 3 advertencias de desvío.\n\nPor protocolo de seguridad, el viaje ha sido cancelado y la central de despacho ha sido notificada.")
+            .setCancelable(false)
+            .setPositiveButton("Aceptar") { _, _ ->
+                finish()
+            }
+            .show()
     }
 
     private fun handleStageAdvance() {

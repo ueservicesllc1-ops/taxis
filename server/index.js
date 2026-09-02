@@ -2355,6 +2355,28 @@ io.on('connection', (socket) => {
   });
 
   // ============================================
+  // ALERTA DE DESVÍO DE RUTA Y SEGURIDAD
+  // ============================================
+  socket.on('ride:off_route_warning', (data) => {
+    try {
+      const rideId = data?.rideId;
+      const level = data?.warningLevel || 1;
+      const dist = data?.distanceOffRoute || 0;
+      logger.warn(`⚠️ Alerta de desvío de ruta (Nivel ${level}) para carrera ${rideId}: Conductor a ${Math.round(dist)}m fuera de ruta.`);
+      io.emit('ride:off_route_alert', {
+        rideId,
+        driverId: socket._driverUid || socket.id,
+        driverName: socket.user?.name || 'Conductor',
+        warningLevel: level,
+        distanceOffRoute: dist,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err) {
+      logger.error('Error handling ride:off_route_warning:', err);
+    }
+  });
+
+  // ============================================
   // DESCONEXIÓN Y RECONEXIÓN
   // ============================================
   socket.on('disconnect', () => {

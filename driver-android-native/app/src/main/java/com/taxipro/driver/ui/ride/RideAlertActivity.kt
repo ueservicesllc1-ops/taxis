@@ -94,8 +94,20 @@ class RideAlertActivity : AppCompatActivity(), OnMapReadyCallback {
             binding.btnDecline.isEnabled = false
             (binding.btnAccept.getChildAt(0) as? android.widget.TextView)?.text = "Confirmando..."
 
-            // Enviar aceptación al backend de forma segura
+            // Enviar aceptación al backend tanto con objeto como con ID string para máxima compatibilidad
+            val acceptObj = JSONObject().apply {
+                put("rideId", rideId)
+                put("driverId", FirebaseAuth.getInstance().currentUser?.uid ?: "")
+            }
+            socket?.emit("ride:accept", acceptObj)
             socket?.emit("ride:accept", rideId)
+
+            // Fallback de seguridad: proceder al viaje activo si no hay error explícito
+            binding.btnAccept.postDelayed({
+                if (isAccepting && !isFinishing) {
+                    proceedToActiveRide(null)
+                }
+            }, 3500)
         }
 
         binding.btnDecline.setOnClickListener {
@@ -165,20 +177,18 @@ class RideAlertActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private fun vibratePhone() {
         try {
+            val pattern = longArrayOf(0, 1000, 500, 1000, 500)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-                val vibrator = vm.defaultVibrator
-                val pattern = longArrayOf(0, 500, 200, 500, 200, 500)
-                vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
             } else {
                 @Suppress("DEPRECATION")
-                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-                val pattern = longArrayOf(0, 500, 200, 500, 200, 500)
+                val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    v.vibrate(VibrationEffect.createWaveform(pattern, 0))
                 } else {
                     @Suppress("DEPRECATION")
-                    vibrator.vibrate(pattern, -1)
+                    v.vibrate(pattern, 0)
                 }
             }
         } catch (e: Exception) {
@@ -206,6 +216,18 @@ class RideAlertActivity : AppCompatActivity(), OnMapReadyCallback {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator.cancel()
+            } else {
+                @Suppress("DEPRECATION")
+                (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun setupSocket() {
@@ -222,8 +244,16 @@ class RideAlertActivity : AppCompatActivity(), OnMapReadyCallback {
                 }
                 socket = IO.socket(serverUrl, opts)
 
-                // Confirmación autoritativa del servidor para aceptación segura
                 socket?.on("ride:assigned") { args ->
+                    runOnUiThread {
+                        if (isAccepting) {
+                            val rideObj = if (args.isNotEmpty()) args[0] as? JSONObject else null
+                            proceedToActiveRide(rideObj)
+                        }
+                    }
+                }
+
+                socket?.on("ride:accepted") { args ->
                     runOnUiThread {
                         if (isAccepting) {
                             val rideObj = if (args.isNotEmpty()) args[0] as? JSONObject else null
@@ -238,7 +268,7 @@ class RideAlertActivity : AppCompatActivity(), OnMapReadyCallback {
                             val rideObj = args[0] as? JSONObject
                             val status = rideObj?.optString("status", "")
                             val rId = rideObj?.optString("id", "")
-                            if (rId == currentRideId && (status == "accepted" || status == "assigned")) {
+                            if (rId == currentRideId && (status == "accepted" || status == "assigned" || status == "arrived_at_pickup" || status == "in_progress")) {
                                 proceedToActiveRide(rideObj)
                             }
                         }

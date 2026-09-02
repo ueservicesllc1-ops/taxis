@@ -1435,15 +1435,10 @@ io.on('connection', (socket) => {
         socket.emit('ride:created', ride);
         io.emit('ride:update', ride);
         io.emit('rides:update', Array.from(rides.values()));
-      } else if (assignedDriver) {
-        // Para carreras con taxista pre-asignado: emitir creación y despachar
+      } else {
+        // Para carreras inmediatas (con o sin taxista pre-asignado): emitir creación y despachar a los taxistas
         socket.emit('ride:created', ride);
         dispatchRide(ride);
-      } else {
-        // Para carreras inmediatas sin taxista pre-asignado: registrar como pending
-        socket.emit('ride:created', ride);
-        io.emit('ride:update', ride);
-        io.emit('rides:update', Array.from(rides.values()));
       }
     } catch (error) {
       logger.error('Error creating ride:', error);
@@ -1967,66 +1962,70 @@ io.on('connection', (socket) => {
   // ============================================
   socket.on('ride:accept', (data) => {
     try {
-      const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['driver', 'admin'];
-      if (!ALLOWED.includes(userRole)) {
-        logger.warn(`Intento no autorizado de aceptar carrera: ${socket.user?.uid} con rol ${userRole}`);
-        socket.emit('error', { message: 'Acceso denegado: Se requiere rol de conductor para aceptar carreras.' });
+      const authenticatedUid = socket.user?.uid;
+      if (!authenticatedUid) {
+        logger.warn(`Conexión sin UID intentó aceptar carrera: ${socket.id}`);
+        socket.emit('error', { message: 'Acceso denegado: Usuario no autenticado.' });
         return;
       }
 
       const rideId = typeof data === 'object' ? data?.rideId : data;
       const ride = rides.get(rideId);
-      const driver = drivers.get(socket.id);
+      const driverUid = socket._driverUid || authenticatedUid;
+      const driver = (driverUid && drivers.get(driverUid)) || drivers.get(socket.id) || {
+        id: driverUid,
+        driverId: driverUid,
+        userId: driverUid,
+        name: socket.user?.name || 'Socio Conductor',
+        vehicle: 'Vehículo Taxi',
+        plate: 'Placa Taxi'
+      };
 
       if (!ride) {
         socket.emit('error', { message: 'Carrera no encontrada' });
         return;
       }
 
-      if (!driver && userRole !== 'admin') {
-        socket.emit('error', { message: 'Conductor no registrado' });
-        return;
-      }
-
-      // AUTORIDAD FINAL: Solo permitir si está pending (abierto), u offered/assigned al chofer específico
+      // AUTORIDAD FINAL: Permitir si está pending, offered o asignada a este chofer
       const isTargetDriver = (ride.driverId === socket.id) || 
-                             (ride.driverId === socket.user?.uid) ||
-                             (ride.driverUid === socket.user?.uid) ||
+                             (ride.driverId === driverUid) ||
+                             (ride.driverUid === driverUid) ||
                              (ride.assignedDriver && (
                                ride.assignedDriver.id === socket.id || 
-                               ride.assignedDriver.id === socket.user?.uid ||
-                               ride.assignedDriver.driverId === socket.user?.uid ||
-                               ride.assignedDriver.userId === socket.user?.uid
+                               ride.assignedDriver.id === driverUid ||
+                               ride.assignedDriver.driverId === driverUid ||
+                               ride.assignedDriver.userId === driverUid
                              )) ||
-                             (ride.assignedDriverId === socket.id || ride.assignedDriverId === socket.user?.uid);
+                             (ride.assignedDriverId === socket.id || ride.assignedDriverId === driverUid);
 
       const isAssignableToMe = (ride.status === 'pending') || 
-                               ((ride.status === 'offered' || ride.status === 'assigned') && isTargetDriver) ||
-                               (userRole === 'admin');
+                               (ride.status === 'offered') ||
+                               (ride.status === 'assigned' && isTargetDriver) ||
+                               (socket.user?.role === 'admin');
 
-      if (!isAssignableToMe) {
-        logger.warn(`Conductor ${driver?.name || socket.user?.uid} intentó aceptar carrera ${rideId} pero ya está en estado "${ride.status}".`);
+      if (!isAssignableToMe && ride.status !== 'pending' && ride.status !== 'offered') {
+        logger.warn(`Conductor ${driver?.name || driverUid} intentó aceptar carrera ${rideId} pero ya está en estado "${ride.status}".`);
         socket.emit('ride:accept_error', { message: 'El viaje ya fue asignado a otro conductor.' });
         return;
       }
 
       clearOfferTimeout(ride.id);
       ride.status = 'accepted';
-      ride.driverId = socket.id;
-      ride.driverUid = socket.user?.uid || driver?.driverId || driver?.userId;
+      ride.driverId = driverUid;
+      ride.driverUid = driverUid;
       ride.driver = {
-        name: driver?.name || 'Conductor',
+        name: driver?.name || socket.user?.name || 'Conductor',
         vehicle: driver?.vehicle || 'Vehículo',
         plate: driver?.plate || 'Placa',
         location: driver?.location || { lat: 0, lng: 0 }
       };
       ride.assignedDriver = {
-        id: socket.id,
-        driverId: socket.user?.uid || driver?.driverId || driver?.userId,
-        userId: socket.user?.uid || driver?.userId || driver?.driverId,
-        name: driver?.name || 'Conductor',
+        id: driverUid,
+        driverId: driverUid,
+        userId: driverUid,
+        name: driver?.name || socket.user?.name || 'Conductor',
         vehicle: driver?.vehicle || 'Vehículo',
+        plate: driver?.plate || 'Placa',
         phone: driver?.phone || ''
       };
       ride.acceptedAt = new Date();
@@ -2034,34 +2033,36 @@ io.on('connection', (socket) => {
       // Cambiar conductor a OCUPADO
       if (driver) {
         driver.available = false;
+        driver.status = 'busy';
         driver.currentRide = rideId;
-        drivers.set(socket.id, driver);
+        drivers.set(driverUid, driver);
       }
 
       rides.set(rideId, ride);
       saveRidesToDisk();
 
-      io.emit('driver:status_change', { driverId: socket.id, status: 'busy', available: false });
+      io.emit('driver:status_change', { driverId: driverUid, status: 'busy', available: false, currentRideId: rideId });
       io.emit('ride:accepted', ride);
       io.emit('ride:update', ride);
       io.emit('rides:update', Array.from(rides.values()));
-      socket.emit('ride:assigned', ride);
 
-      logger.info(`Carrera ${rideId} asignada y aceptada exclusivamente por ${driver?.name || socket.user?.uid} (Socket: ${socket.id})`);
+      // Notificación directa garantizada al socket y a la sala del UID
+      socket.emit('ride:assigned', ride);
+      socket.emit('ride:accepted', ride);
+      io.to(driverUid).emit('ride:assigned', ride);
+      io.to(driverUid).emit('ride:accepted', ride);
+
+      logger.info(`Carrera ${rideId} asignada y aceptada exclusivamente por ${driver?.name || driverUid} (Socket: ${socket.id}, UID: ${driverUid})`);
     } catch (error) {
       logger.error('Error accepting ride:', error);
-      socket.emit('error', { message: 'Error al aceptar carrera' });
+      socket.emit('error', { message: 'Error al aceptar carrera: ' + (error.message || error) });
     }
   });
 
   socket.on('ride:arrived_at_pickup', (data) => {
     try {
-      const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['driver', 'admin'];
-      if (!ALLOWED.includes(userRole)) {
-        socket.emit('error', { message: 'Acceso denegado: Se requiere rol de conductor.' });
-        return;
-      }
+      const authenticatedUid = socket.user?.uid;
+      if (!authenticatedUid) return;
 
       const rideId = typeof data === 'string' ? data : (data?.rideId || '');
       const ride = rides.get(rideId);
@@ -2070,10 +2071,12 @@ io.on('connection', (socket) => {
         return;
       }
 
+      const driverUid = socket._driverUid || authenticatedUid;
       const isAssigned = (ride.driverId === socket.id) || 
-                         (ride.driverId === socket.user?.uid) ||
-                         (ride.assignedDriver && (ride.assignedDriver.id === socket.id || ride.assignedDriver.id === socket.user?.uid));
-      if (!isAssigned && userRole !== 'admin') {
+                         (ride.driverId === driverUid) ||
+                         (ride.driverUid === driverUid) ||
+                         (ride.assignedDriver && (ride.assignedDriver.id === socket.id || ride.assignedDriver.id === driverUid || ride.assignedDriver.driverId === driverUid));
+      if (!isAssigned && socket.user?.role !== 'admin') {
         socket.emit('error', { message: 'No estás asignado a esta carrera.' });
         return;
       }
@@ -2093,20 +2096,18 @@ io.on('connection', (socket) => {
 
   socket.on('ride:picked_up', (data) => {
     try {
-      const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['driver', 'admin'];
-      if (!ALLOWED.includes(userRole)) {
-        socket.emit('error', { message: 'Acceso denegado: Se requiere rol de conductor.' });
-        return;
-      }
+      const authenticatedUid = socket.user?.uid;
+      if (!authenticatedUid) return;
 
       const rideId = typeof data === 'string' ? data : (data?.rideId || '');
       const ride = rides.get(rideId);
       if (ride) {
+        const driverUid = socket._driverUid || authenticatedUid;
         const isAssigned = (ride.driverId === socket.id) || 
-                           (ride.driverId === socket.user?.uid) ||
-                           (ride.assignedDriver && (ride.assignedDriver.id === socket.id || ride.assignedDriver.id === socket.user?.uid));
-        if (!isAssigned && userRole !== 'admin') {
+                           (ride.driverId === driverUid) ||
+                           (ride.driverUid === driverUid) ||
+                           (ride.assignedDriver && (ride.assignedDriver.id === socket.id || ride.assignedDriver.id === driverUid || ride.assignedDriver.driverId === driverUid));
+        if (!isAssigned && socket.user?.role !== 'admin') {
           socket.emit('error', { message: 'No estás asignado a esta carrera.' });
           return;
         }
@@ -2129,19 +2130,17 @@ io.on('connection', (socket) => {
 
   socket.on('ride:start', (rideId) => {
     try {
-      const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['driver', 'admin'];
-      if (!ALLOWED.includes(userRole)) {
-        socket.emit('error', { message: 'Acceso denegado: Se requiere rol de conductor.' });
-        return;
-      }
+      const authenticatedUid = socket.user?.uid;
+      if (!authenticatedUid) return;
 
       const ride = rides.get(rideId);
       if (ride) {
+        const driverUid = socket._driverUid || authenticatedUid;
         const isAssigned = (ride.driverId === socket.id) || 
-                           (ride.driverId === socket.user?.uid) ||
-                           (ride.assignedDriver && (ride.assignedDriver.id === socket.id || ride.assignedDriver.id === socket.user?.uid));
-        if (!isAssigned && userRole !== 'admin') {
+                           (ride.driverId === driverUid) ||
+                           (ride.driverUid === driverUid) ||
+                           (ride.assignedDriver && (ride.assignedDriver.id === socket.id || ride.assignedDriver.id === driverUid || ride.assignedDriver.driverId === driverUid));
+        if (!isAssigned && socket.user?.role !== 'admin') {
           socket.emit('error', { message: 'No estás asignado a esta carrera.' });
           return;
         }
@@ -2161,16 +2160,13 @@ io.on('connection', (socket) => {
 
   socket.on('ride:complete', async (data) => {
     try {
-      const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['driver', 'admin'];
-      if (!ALLOWED.includes(userRole)) {
-        socket.emit('error', { message: 'Acceso denegado: Se requiere rol de conductor.' });
-        return;
-      }
+      const authenticatedUid = socket.user?.uid;
+      if (!authenticatedUid) return;
 
       const rideId = typeof data === 'object' ? data?.rideId : data;
       const ride = rides.get(rideId);
-      const driver = drivers.get(socket.id);
+      const driverUid = socket._driverUid || authenticatedUid;
+      const driver = (driverUid && drivers.get(driverUid)) || drivers.get(socket.id);
 
       if (!ride) {
         logger.warn(`Intento de completar carrera no existente: ${rideId}`);
@@ -2180,12 +2176,13 @@ io.on('connection', (socket) => {
 
       // Validar asignación de conductor (Socket ID o UID)
       const isAssigned = (ride.driverId === socket.id) || 
-                         (ride.driverId === socket.user?.uid) ||
+                         (ride.driverId === driverUid) ||
+                         (ride.driverUid === driverUid) ||
                          (driver && (ride.driverId === driver.driverId || ride.driverId === driver.userId)) ||
-                         (ride.assignedDriver && ((ride.assignedDriver.id === socket.id || ride.assignedDriver.id === socket.user?.uid) || (driver && ride.assignedDriver.name === driver.name)));
+                         (ride.assignedDriver && ((ride.assignedDriver.id === socket.id || ride.assignedDriver.id === driverUid) || (driver && ride.assignedDriver.name === driver.name)));
 
-      if (!isAssigned && userRole !== 'admin') {
-        logger.warn(`Conductor ${driver?.name || socket.user?.uid} no autorizado para completar carrera ${rideId}.`);
+      if (!isAssigned && socket.user?.role !== 'admin') {
+        logger.warn(`Conductor ${driver?.name || driverUid} no autorizado para completar carrera ${rideId}.`);
         socket.emit('error', { message: 'No estás asignado a esta carrera.' });
         return;
       }
@@ -2218,9 +2215,9 @@ io.on('connection', (socket) => {
         driver.available = true;
         driver.status = 'available';
         driver.currentRide = null;
-        drivers.set(socket.id, driver);
+        drivers.set(driverUid, driver);
         io.emit('driver:status_change', {
-          driverId: socket.id,
+          driverId: driverUid,
           status: 'available',
           available: true,
           currentRideId: null
@@ -2230,7 +2227,7 @@ io.on('connection', (socket) => {
       const earningRecord = {
         earningId: uuidv4(),
         rideId: ride.id,
-        driverId: driver ? (driver.driverId || driver.userId || socket.id) : (ride.assignedDriver?.id || socket.id),
+        driverId: driverUid,
         driverSocketId: socket.id,
         driverName: driver ? driver.name : (ride.assignedDriver?.name || 'Conductor'),
         passengerName: ride.customerName || 'Pasajero',
@@ -2500,19 +2497,22 @@ function dispatchRide(ride) {
       targetDriver.status = 'offered';
       targetDriver.available = false;
       targetDriver.currentRide = ride.id;
-      drivers.set(targetDriver.id, targetDriver);
+      const targetDriverUid = targetDriver.driverId || targetDriver.userId || targetDriver.id;
+      drivers.set(targetDriverUid, targetDriver);
 
       ride.status = 'offered';
-      ride.driverId = targetDriver.id;
+      ride.driverId = targetDriverUid;
       rides.set(ride.id, ride);
       saveRidesToDisk();
 
-      io.to(targetDriver.id).emit('ride:new', ride);
+      if (targetDriver.socketId) io.to(targetDriver.socketId).emit('ride:new', ride);
+      if (targetDriverUid) io.to(targetDriverUid).emit('ride:new', ride);
+      if (targetDriver.id) io.to(targetDriver.id).emit('ride:new', ride);
       sendFcmNotificationToDriver(targetDriver, ride);
-      startOfferTimeout(ride, targetDriver.id, 15000);
+      startOfferTimeout(ride, targetDriverUid, 20000);
 
       io.emit('driver:status_change', {
-        driverId: targetDriver.id,
+        driverId: targetDriverUid,
         status: 'offered',
         available: false,
         currentRideId: ride.id
@@ -2555,12 +2555,13 @@ function reassignNextAvailableDriver(ride) {
     }
 
     const nextDriver = availableCandidates[0];
+    const nextDriverUid = nextDriver.driverId || nextDriver.userId || nextDriver.id;
     nextDriver.status = 'offered';
     nextDriver.available = false;
     nextDriver.currentRide = ride.id;
-    drivers.set(nextDriver.id, nextDriver);
+    drivers.set(nextDriverUid, nextDriver);
     io.emit('driver:status_change', {
-      driverId: nextDriver.id,
+      driverId: nextDriverUid,
       status: 'offered',
       available: false,
       currentRideId: ride.id
@@ -2568,20 +2569,22 @@ function reassignNextAvailableDriver(ride) {
 
     ride.status = 'offered';
     ride.assignedDriver = {
-      id: nextDriver.id,
+      id: nextDriverUid,
       name: nextDriver.name,
       vehicle: nextDriver.vehicle,
       phone: nextDriver.phone || ''
     };
-    ride.driverId = nextDriver.id;
+    ride.driverId = nextDriverUid;
     rides.set(ride.id, ride);
     saveRidesToDisk();
 
-    io.to(nextDriver.id).emit('ride:new', ride);
+    if (nextDriver.socketId) io.to(nextDriver.socketId).emit('ride:new', ride);
+    if (nextDriverUid) io.to(nextDriverUid).emit('ride:new', ride);
+    if (nextDriver.id) io.to(nextDriver.id).emit('ride:new', ride);
     sendFcmNotificationToDriver(nextDriver, ride);
-    startOfferTimeout(ride, nextDriver.id, 15000);
+    startOfferTimeout(ride, nextDriverUid, 20000);
 
-    io.emit('ride:reassigned', { rideId: ride.id, driverName: nextDriver.name, driverId: nextDriver.id });
+    io.emit('ride:reassigned', { rideId: ride.id, driverName: nextDriver.name, driverId: nextDriverUid });
     io.emit('ride:update', ride);
     io.emit('rides:update', Array.from(rides.values()));
     logger.info(`Carrera ${ride.id} reasignada automáticamente al siguiente conductor disponible: ${nextDriver.name}`);

@@ -2355,7 +2355,7 @@ io.on('connection', (socket) => {
   });
 
   // ============================================
-  // ALERTA DE DESVÍO DE RUTA Y SEGURIDAD
+  // ALERTA DE DESVÍO DE RUTA Y JUSTIFICACIÓN
   // ============================================
   socket.on('ride:off_route_warning', (data) => {
     try {
@@ -2373,6 +2373,25 @@ io.on('connection', (socket) => {
       });
     } catch (err) {
       logger.error('Error handling ride:off_route_warning:', err);
+    }
+  });
+
+  socket.on('ride:route_detour_justified', (data) => {
+    try {
+      const rideId = data?.rideId;
+      const reason = data?.reason || 'Desvío justificado por el conductor';
+      const dist = data?.offRouteDistance || 0;
+      logger.info(`🗺️ Desvío justificado para carrera ${rideId}: "${reason}" (${Math.round(dist)}m fuera de ruta). Central notificada.`);
+      io.emit('ride:detour_reported', {
+        rideId,
+        driverId: socket._driverUid || socket.id,
+        driverName: socket.user?.name || 'Conductor',
+        reason,
+        offRouteDistance: dist,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err) {
+      logger.error('Error handling ride:route_detour_justified:', err);
     }
   });
 

@@ -592,9 +592,9 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
         if (offRouteDistance > 300f) {
             // Se está alejando de la ruta
             if (offRouteDistance > 750f && offRouteWarningLevel >= 2) {
-                // NIVEL 3: DESVÍO EXTREMO -> CANCELAR AUTOMÁTICAMENTE
+                // NIVEL 3: DESVÍO EXTREMO -> SOLICITAR JUSTIFICACIÓN O CANCELAR
                 offRouteWarningLevel = 3
-                triggerAutoCancelDueToDeviation(offRouteDistance)
+                handleExtremeRouteDeviation(offRouteDistance)
             } else if (offRouteDistance > 500f && (offRouteWarningLevel < 2 || (now - lastOffRouteWarningTimestamp > 20000L))) {
                 // NIVEL 2: SEGUNDA ADVERTENCIA
                 offRouteWarningLevel = 2
@@ -603,8 +603,8 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
 
                 binding.bannerNavigation.setCardBackgroundColor(Color.parseColor("#DC2626")) // Rojo
                 binding.tvNavNextInstruction.text = "🚨 Advertencia 2/3: Desvío Crítico (${offRouteDistance.toInt()}m)"
-                binding.tvNavStreetName.text = "Regresa a la ruta o el viaje se cancelará"
-                speakVoiceInstruction("Segunda advertencia. Continúas fuera de la ruta. Si te alejas más, el viaje se cancelará automáticamente.")
+                binding.tvNavStreetName.text = "Regresa a la ruta o justifica el desvío"
+                speakVoiceInstruction("Segunda advertencia. Continúas fuera de la ruta. Si te alejas más, deberás justificar el desvío.")
             } else if (offRouteWarningLevel < 1 || (now - lastOffRouteWarningTimestamp > 25000L)) {
                 // NIVEL 1: PRIMERA ADVERTENCIA
                 offRouteWarningLevel = 1
@@ -638,9 +638,41 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
         }
     }
 
-    private fun triggerAutoCancelDueToDeviation(offDistance: Float) {
-        val reason = "Cancelación automática por desvío excesivo de ruta (${offDistance.toInt()}m fuera de ruta tras 3 advertencias)"
-        speakVoiceInstruction("Viaje cancelado automáticamente por desvío excesivo de la ruta. Central notificada.")
+    private fun handleExtremeRouteDeviation(offDistance: Float) {
+        speakVoiceInstruction("Atención: Desvío de más de 750 metros detectado. Por favor justifica el desvío o cancela el viaje.")
+
+        val reasons = arrayOf(
+            "🚧 Calle cerrada o construcción en la vía",
+            "💥 Accidente de tránsito / Tráfico pesado",
+            "👤 El pasajero solicitó una ruta alterna",
+            "🛣️ Desvío por sentido vial / Un solo sentido",
+            "⚠️ Emergencia o imprevisto en la vía"
+        )
+        var selectedReasonIndex = 0
+
+        AlertDialog.Builder(this)
+            .setTitle("⚠️ Desvío de Ruta Detectado (${offDistance.toInt()}m)")
+            .setMessage("Te encuentras a más de ${offDistance.toInt()}m de la ruta original establecida.\n\nPara continuar con el servicio, selecciona el motivo del desvío para recalcular la ruta automáticamente e informar a la central:")
+            .setSingleChoiceItems(reasons, 0) { _, which ->
+                selectedReasonIndex = which
+            }
+            .setPositiveButton("Recalcular Nueva Ruta") { _, _ ->
+                val chosenReason = reasons[selectedReasonIndex]
+                justifyAndRecalculateRoute(chosenReason, offDistance)
+            }
+            .setNegativeButton("Cancelar Carrera") { _, _ ->
+                val chosenReason = reasons[selectedReasonIndex]
+                confirmCancelRide("Desvío no recuperable: $chosenReason")
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun justifyAndRecalculateRoute(reason: String, offDistance: Float) {
+        offRouteWarningLevel = 0
+        binding.bannerNavigation.setCardBackgroundColor(Color.parseColor("#000000"))
+        speakVoiceInstruction("Motivo registrado: $reason. Recalculando nueva ruta hacia el destino.")
+        Toast.makeText(this, "Ruta recalculada. Central informada: $reason", Toast.LENGTH_LONG).show()
 
         try {
             val prefs = getSharedPreferences("driver_prefs", Context.MODE_PRIVATE)
@@ -649,24 +681,16 @@ class ActiveRideActivity : AppCompatActivity(), OnMapReadyCallback, TextToSpeech
                 put("rideId", rideId)
                 put("driverId", driverName)
                 put("reason", reason)
-                put("autoCancelled", true)
                 put("offRouteDistance", offDistance)
                 put("timestamp", System.currentTimeMillis())
             }
-            socket?.emit("ride:cancel", json)
-            clearActiveRideState()
+            socket?.emit("ride:route_detour_justified", json)
         } catch (e: Exception) {
-            Log.e("ActiveRide", "Error in auto-cancel", e)
+            Log.e("ActiveRide", "Error emitting detour justification", e)
         }
 
-        AlertDialog.Builder(this)
-            .setTitle("🚫 Viaje Cancelado por Seguridad")
-            .setMessage("Te has alejado más de ${offDistance.toInt()}m de la ruta establecida tras recibir 3 advertencias de desvío.\n\nPor protocolo de seguridad, el viaje ha sido cancelado y la central de despacho ha sido notificada.")
-            .setCancelable(false)
-            .setPositiveButton("Aceptar") { _, _ ->
-                finish()
-            }
-            .show()
+        // Trazar nueva ruta de inmediato desde la posición actual
+        fetchRealRoutePolyline()
     }
 
     private fun handleStageAdvance() {

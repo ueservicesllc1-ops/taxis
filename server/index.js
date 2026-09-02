@@ -95,12 +95,17 @@ async function verifyAuthToken(token) {
           else if (decoded.supervisor) role = 'supervisor';
           else if (decoded.driver) role = 'driver';
           else {
-            const uidLower = decoded.uid.toLowerCase();
+            const uidLower = (decoded.uid || '').toLowerCase();
             if (uidLower.startsWith('admin')) role = 'admin';
             else if (uidLower.startsWith('dispatcher')) role = 'dispatcher';
             else if (uidLower.startsWith('supervisor')) role = 'supervisor';
             else if (uidLower.startsWith('driver')) role = 'driver';
-            else role = 'driver';
+            else if (decoded.email || decoded.firebase?.sign_in_provider === 'google.com' || decoded.firebase?.sign_in_provider === 'password') {
+              // Operadores autenticados con Google o Email en el panel de Central
+              role = 'dispatcher';
+            } else {
+              role = 'driver';
+            }
           }
         }
         return {
@@ -1245,7 +1250,7 @@ io.on('connection', (socket) => {
   socket.on('ride:create', (rideData) => {
     try {
       const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['admin', 'dispatcher'];
+      const ALLOWED = ['admin', 'dispatcher', 'supervisor'];
       if (!ALLOWED.includes(userRole)) {
         logger.warn(`Intento no autorizado de crear carrera: ${socket.user?.uid} con rol ${userRole}`);
         socket.emit('error', { message: 'Acceso denegado: No tienes permisos para crear carreras.' });

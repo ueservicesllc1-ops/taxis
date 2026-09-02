@@ -78,7 +78,7 @@ async function verifyAuthToken(token) {
   // 1. Verificar Firebase ID Token real
   if (firebaseAuthAdmin && !cleanToken.startsWith('test_token.')) {
     try {
-      const decoded = await firebaseAuthAdmin.verifyIdToken(cleanToken, true);
+      const decoded = await firebaseAuthAdmin.verifyIdToken(cleanToken);
       if (decoded && decoded.uid) {
         let role = decoded.role;
         if (!role) {
@@ -105,7 +105,7 @@ async function verifyAuthToken(token) {
         };
       }
     } catch (firebaseErr) {
-      // Si falla verificación Firebase, comprobar si es un token de prueba firmado
+      logger.warn(`Firebase ID Token verify error: ${firebaseErr.message}`);
     }
   }
 

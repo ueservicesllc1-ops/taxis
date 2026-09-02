@@ -47,20 +47,33 @@ class LocationForegroundService : Service() {
         user.getIdToken(false).addOnSuccessListener { tokenResult ->
             val idToken = tokenResult.token ?: return@addOnSuccessListener
             try {
+                if (socket != null && socket?.connected() == true) {
+                    return@addOnSuccessListener
+                }
+
                 val serverUrl = com.taxipro.driver.config.AppConfig.getServerUrl(this)
                 val opts = IO.Options().apply {
                     auth = mapOf("token" to idToken)
+                    extraHeaders = mapOf("Authorization" to listOf("Bearer $idToken"))
+                    transports = arrayOf("websocket", "polling")
                     reconnection = true
-                    reconnectionAttempts = 20
+                    reconnectionAttempts = 50
                     reconnectionDelay = 1000
                 }
                 socket = IO.socket(serverUrl, opts)
 
-                socket?.on(Socket.EVENT_CONNECT_ERROR) {
-                    Log.w(TAG, "Socket connect error, refrescando token...")
+                socket?.on(Socket.EVENT_CONNECT_ERROR) { args ->
+                    val errDesc = if (args.isNotEmpty()) args[0].toString() else "Unknown"
+                    Log.w(TAG, "Socket connect error: $errDesc, refrescando token...")
                     auth.currentUser?.getIdToken(true)?.addOnSuccessListener { refreshed ->
-                        refreshed.token?.let {
-                            val newOpts = IO.Options().apply { auth = mapOf("token" to it) }
+                        refreshed.token?.let { freshToken ->
+                            try {
+                                opts.auth = mapOf("token" to freshToken)
+                                opts.extraHeaders = mapOf("Authorization" to listOf("Bearer $freshToken"))
+                                socket?.connect()
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error updating socket auth after refresh", e)
+                            }
                         }
                     }
                 }
@@ -85,6 +98,18 @@ class LocationForegroundService : Service() {
                     }
                     socket?.emit("register:driver", regObj)
                     Log.i(TAG, "Socket autenticado conectado y registrado a $serverUrl (UID: $uid)")
+
+                    // Emitir de inmediato la última ubicación conocida para aparecer en el mapa de despacho
+                    val lastLat = prefs.getFloat("last_driver_lat", 0f).toDouble()
+                    val lastLng = prefs.getFloat("last_driver_lng", 0f).toDouble()
+                    if (lastLat != 0.0 && lastLng != 0.0) {
+                        val initLoc = JSONObject().apply {
+                            put("lat", lastLat)
+                            put("lng", lastLng)
+                            put("heading", 0.0)
+                        }
+                        socket?.emit("driver:location", initLoc)
+                    }
                 }
 
                 socket?.on("ride:new") { args ->
@@ -179,6 +204,9 @@ class LocationForegroundService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, createNotification())
+                if (socket == null || socket?.connected() != true) {
+                    setupSocket()
+                }
                 requestLocationUpdates()
             }
             ACTION_STOP -> {

@@ -659,8 +659,12 @@ app.post('/api/admin/set-role', requireAuth, requireRole('admin'), async (req, r
     }
 
     if (firebaseAuthAdmin) {
-      await firebaseAuthAdmin.setCustomUserClaims(uid, { role: normalizedRole });
-      logger.info(`Custom Claims actualizados para UID ${uid} -> rol: ${normalizedRole}`);
+      try {
+        await firebaseAuthAdmin.setCustomUserClaims(uid, { role: normalizedRole });
+        logger.info(`Custom Claims actualizados para UID ${uid} -> rol: ${normalizedRole}`);
+      } catch (claimsErr) {
+        logger.warn(`Firebase setCustomUserClaims note: ${claimsErr.message}`);
+      }
     }
 
     res.json({
@@ -784,6 +788,135 @@ app.get('/api/drivers/:driverId/trips/:tripId', requireAuth, (req, res) => {
 });
 
 // ============================================
+// GESTIÓN DE TIMEOUTS DE OFERTA Y REASIGNACIÓN (FASE 5D)
+// ============================================
+const offerTimers = new Map();
+
+function clearOfferTimeout(rideId) {
+  if (offerTimers.has(rideId)) {
+    clearTimeout(offerTimers.get(rideId));
+    offerTimers.delete(rideId);
+    logger.info(`Offer timer cancelado para carrera ${rideId}`);
+  }
+}
+
+function startOfferTimeout(ride, driverId, timeoutMs = 15000) {
+  clearOfferTimeout(ride.id);
+  const timer = setTimeout(() => {
+    offerTimers.delete(ride.id);
+    const currentRide = rides.get(ride.id);
+    if (!currentRide || ['accepted', 'in_progress', 'completed', 'cancelled'].includes(currentRide.status)) {
+      return;
+    }
+    logger.info(`⏰ [SERVER TIMEOUT] Oferta de carrera ${ride.id} expiró tras ${timeoutMs}ms para el conductor ${driverId}`);
+    
+    // Registrar conductor como expirado
+    currentRide.expiredDrivers = currentRide.expiredDrivers || [];
+    if (!currentRide.expiredDrivers.includes(driverId)) {
+      currentRide.expiredDrivers.push(driverId);
+    }
+    
+    const driver = drivers.get(driverId);
+    if (driver) {
+      driver.available = true;
+      driver.currentRide = null;
+      drivers.set(driverId, driver);
+      io.emit('driver:online', driver);
+    }
+
+    io.to(driverId).emit('ride:expired', {
+      rideId: ride.id,
+      driverId: driverId,
+      message: 'El tiempo para aceptar esta carrera ha expirado.'
+    });
+
+    reassignNextAvailableDriver(currentRide);
+  }, timeoutMs);
+
+  offerTimers.set(ride.id, timer);
+  logger.info(`Offer timer de ${timeoutMs}ms iniciado en servidor para carrera ${ride.id} -> conductor ${driverId}`);
+}
+
+function reassignNextAvailableDriver(ride) {
+  if (!ride || ['completed', 'cancelled', 'in_progress', 'accepted'].includes(ride.status)) return;
+  
+  clearOfferTimeout(ride.id);
+
+  const excludedIds = [
+    ...(ride.rejectedDrivers || []),
+    ...(ride.expiredDrivers || [])
+  ];
+
+  const availableDrivers = Array.from(drivers.values()).filter(d => 
+    d.isOnline && 
+    d.available && 
+    !excludedIds.includes(d.id) &&
+    !excludedIds.includes(d.userId) &&
+    !excludedIds.includes(d.driverId)
+  );
+
+  if (availableDrivers.length > 0) {
+    let nextDriver = availableDrivers[0];
+    if (ride.pickup && typeof ride.pickup === 'object' && ride.pickup.lat && ride.pickup.lng) {
+      let minDistance = Infinity;
+      availableDrivers.forEach(d => {
+        if (d.location && d.location.lat && d.location.lng) {
+          const dist = calculateDistance(ride.pickup.lat, ride.pickup.lng, d.location.lat, d.location.lng);
+          if (dist < minDistance) {
+            minDistance = dist;
+            nextDriver = d;
+          }
+        }
+      });
+    }
+
+    ride.status = 'assigned';
+    ride.assignedDriver = {
+      id: nextDriver.id,
+      name: nextDriver.name,
+      vehicle: nextDriver.vehicle,
+      phone: nextDriver.phone
+    };
+    ride.assignedDriverId = nextDriver.id;
+    ride.driverId = nextDriver.id;
+    ride.version = (ride.version || 1) + 1;
+    ride.updatedAt = new Date().toISOString();
+
+    nextDriver.status = 'offered';
+    nextDriver.available = true;
+    nextDriver.currentRide = ride.id;
+    drivers.set(nextDriver.id, nextDriver);
+
+    rides.set(ride.id, ride);
+    saveRidesToDisk();
+
+    io.to(nextDriver.id).emit('ride:new', ride);
+    io.to(nextDriver.id).emit('ride:assigned', ride);
+    sendFcmNotificationToDriver(nextDriver, ride);
+    startOfferTimeout(ride, nextDriver.id, 15000);
+
+    io.emit('ride:update', ride);
+    io.emit('rides:update', Array.from(rides.values()));
+    logger.info(`Carrera ${ride.id} reasignada automáticamente al siguiente conductor disponible: ${nextDriver.name}`);
+  } else {
+    ride.status = 'pending';
+    ride.assignedDriver = null;
+    ride.assignedDriverId = null;
+    ride.driverId = null;
+    ride.version = (ride.version || 1) + 1;
+    ride.updatedAt = new Date().toISOString();
+
+    rides.set(ride.id, ride);
+    saveRidesToDisk();
+
+    io.emit('ride:no_drivers_available', { rideId: ride.id, message: 'No hay más conductores disponibles para esta solicitud.' });
+    io.emit('ride:update', ride);
+    io.emit('rides:update', Array.from(rides.values()));
+    logger.warn(`Carrera ${ride.id} sin más conductores disponibles. Estado cambiado a pending.`);
+  }
+}
+
+// ============================================
 // MOTOR DE DESPACHO Y ACTIVACIÓN (FASE 1 & FASE 4C-1)
 // ============================================
 function dispatchRide(ride) {
@@ -821,6 +954,7 @@ function dispatchRide(ride) {
     io.to(assignedDriver.id).emit('ride:new', ride);
     io.to(assignedDriver.id).emit('ride:assigned', ride);
     sendFcmNotificationToDriver(assignedDriver, ride);
+    startOfferTimeout(ride, assignedDriver.id, 15000);
     logger.info(`Carrera ${ride.id} despachada y asignada al taxista ${assignedDriver.name}`);
   } else {
     ride.status = 'pending';

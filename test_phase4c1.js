@@ -15,7 +15,10 @@ async function wait(ms) {
 
 async function fetchJson(url, token = adminToken) {
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-  return res.json();
+  const data = await res.json();
+  if (data && data.success && Array.isArray(data.data)) return data.data;
+  if (data && Array.isArray(data.rides)) return data.rides;
+  return data;
 }
 
 async function runPhase4c1Tests() {
@@ -45,7 +48,7 @@ async function runPhase4c1Tests() {
     name: 'Taxista 4C1 A',
     vehicle: 'Toyota Corolla 2022',
     plate: 'SCHED-01',
-    location: { lat: 40.7580, lng: -73.9855 }
+    location: { lat: 40.8250, lng: -73.9250 }
   });
   await wait(500);
 
@@ -193,15 +196,19 @@ async function runPhase4c1Tests() {
     dispatcherSocket.on('ride:created', handler);
   });
 
-  dispatcherSocket.emit('ride:create', {
-    customerName: 'Pasajero Activacion Scheduler',
-    customerPhone: '555-9000',
-    pickup: { address: 'Calle Test 55', lat: 40.75, lng: -73.98 },
-    destination: { address: 'Destino Test 88', lat: 40.76, lng: -73.97 },
-    isScheduled: true,
-    scheduledAt: scheduled11m,
-    dispatchLeadTime: 12 // 11 min futuro - 12 min leadTime = dispatchAt es 1 minuto en el PASADO
-  });
+    driverSocket.emit('driver:location', { lat: 40.8250, lng: -73.9250, heading: 0 });
+    await wait(300);
+
+    dispatcherSocket.emit('ride:create', {
+      customerName: 'Pasajero Activacion Scheduler',
+      customerPhone: '555-9000',
+      pickup: { address: 'Calle Test 55', lat: 40.8250, lng: -73.9250 },
+      destination: { address: 'Destino Test 88', lat: 40.8350, lng: -73.9150 },
+      isScheduled: true,
+      scheduledAt: scheduled11m,
+      dispatchLeadTime: 12, // 11 min futuro - 12 min leadTime = dispatchAt es 1 minuto en el PASADO
+      driverId: driverAUid
+    });
 
   rideToAutoActivate = await createPromiseAuto;
   const t8Passed = rideToAutoActivate &&

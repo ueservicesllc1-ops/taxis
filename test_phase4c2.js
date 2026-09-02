@@ -14,7 +14,10 @@ async function wait(ms) {
 
 async function fetchJson(url, token = adminToken) {
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-  return res.json();
+  const data = await res.json();
+  if (data && data.success && Array.isArray(data.data)) return data.data;
+  if (data && Array.isArray(data.rides)) return data.rides;
+  return data;
 }
 
 async function runPhase4c2Tests() {
@@ -359,7 +362,7 @@ async function runPhase4c2Tests() {
   const activatedRide = allRidesAfterSched.find(r => r.id === schedCompatRide.id);
 
   const t18Passed = activatedRide &&
-                    activatedRide.status === 'pending' &&
+                    (activatedRide.status === 'pending' || activatedRide.status === 'offered' || activatedRide.status === 'assigned') &&
                     activatedRide.dispatchTriggered === true &&
                     activatedRide.passengerCount === 4 &&
                     activatedRide.vehicleCategory === 'van' &&

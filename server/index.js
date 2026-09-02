@@ -1639,7 +1639,7 @@ io.on('connection', (socket) => {
   socket.on('ride:assign', ({ rideId, driverId }) => {
     try {
       const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['admin', 'dispatcher'];
+      const ALLOWED = ['admin', 'dispatcher', 'supervisor'];
       if (!ALLOWED.includes(userRole)) {
         logger.warn(`Intento no autorizado de asignar carrera: ${socket.user?.uid} con rol ${userRole}`);
         socket.emit('error', { message: 'Acceso denegado: No tienes permisos para asignar carreras.' });
@@ -1652,7 +1652,7 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const driver = drivers.get(driverId) || Array.from(drivers.values()).find(d => d.id === driverId);
+      const driver = drivers.get(driverId) || Array.from(drivers.values()).find(d => d.id === driverId || d.driverId === driverId || d.userId === driverId);
       if (!driver) {
         socket.emit('error', { message: 'Taxista no encontrado o no conectado' });
         return;
@@ -1665,6 +1665,7 @@ io.on('connection', (socket) => {
         vehicle: driver.vehicle,
         phone: driver.phone
       };
+      ride.driverId = driver.id;
       rides.set(ride.id, ride);
       saveRidesToDisk();
 
@@ -1697,7 +1698,7 @@ io.on('connection', (socket) => {
   socket.on('ride:unassign', ({ rideId, reason, reassignMode, newDriverId }) => {
     try {
       const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['admin', 'dispatcher'];
+      const ALLOWED = ['admin', 'dispatcher', 'supervisor'];
       if (!ALLOWED.includes(userRole)) {
         logger.warn(`Intento no autorizado de desasignar/cancelar carrera: ${socket.user?.uid} con rol ${userRole}`);
         socket.emit('error', { message: 'Acceso denegado: No tienes permisos para desasignar o cancelar carreras.' });
@@ -1720,11 +1721,11 @@ io.on('connection', (socket) => {
           rideId,
           reason: reason || 'Asignación cancelada por la central'
         });
-        const d = drivers.get(prevDriverId);
+        const d = drivers.get(prevDriverId) || Array.from(drivers.values()).find(x => x.id === prevDriverId || x.driverId === prevDriverId || x.userId === prevDriverId);
         if (d) {
           d.available = true;
           d.currentRide = null;
-          drivers.set(prevDriverId, d);
+          drivers.set(d.id, d);
           io.emit('driver:online', d);
         }
       }
@@ -1753,7 +1754,7 @@ io.on('connection', (socket) => {
         logger.info(`Carrera ${rideId} desasignada por "${reason}". Reasignando automáticamente a la flota activa.`);
       } else if (reassignMode === 'manual' && newDriverId) {
         // Asignar inmediatamente a un taxista específico
-        const newDriver = drivers.get(newDriverId) || Array.from(drivers.values()).find(d => d.id === newDriverId);
+        const newDriver = drivers.get(newDriverId) || Array.from(drivers.values()).find(d => d.id === newDriverId || d.driverId === newDriverId || d.userId === newDriverId);
         if (newDriver) {
           ride.status = 'assigned';
           ride.assignedDriver = {

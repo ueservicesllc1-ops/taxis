@@ -285,7 +285,13 @@ const io = socketIO(server, {
   cors: {
     origin: process.env.ALLOWED_ORIGINS?.split(',') || "*",
     methods: ["GET", "POST"]
-  }
+  },
+  // Railway proxy: evitar desconexiones silenciosas
+  pingTimeout: 60000,        // 60s antes de considerar la conexión muerta
+  pingInterval: 25000,       // ping cada 25s (< timeout del proxy Railway)
+  transports: ['websocket', 'polling'],  // WebSocket primero, polling como fallback
+  allowUpgrades: true,
+  upgradeTimeout: 30000
 });
 
 const PORT = process.env.PORT || 3000;

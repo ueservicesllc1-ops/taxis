@@ -262,25 +262,32 @@ function setupAuth() {
 // Inicializar / Reconectar Socket autenticado (FASE 5A)
 async function initAuthenticatedSocket(user) {
     const token = await user.getIdToken();
+
+    // Si ya está conectado, solo refrescar token y re-registrar
     if (socket && socket.connected) {
         socket.auth = { token };
         socket.emit('register:dispatcher', { name: user.displayName || user.email });
         return;
     }
 
+    // Destruir socket viejo si existe (para evitar listeners duplicados o estado corrupto)
     if (socket) {
-        socket.auth = { token };
-        socket.connect();
-    } else {
-        socket = io({
-            auth: { token },
-            reconnection: true,
-            reconnectionAttempts: 20,
-            reconnectionDelay: 1000
-        });
-
-        setupSocketListeners();
+        socket.removeAllListeners();
+        socket.disconnect();
+        socket = null;
     }
+
+    // Crear socket nuevo limpio siempre
+    socket = io({
+        auth: { token },
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
+        transports: ['websocket', 'polling']
+    });
+
+    setupSocketListeners();
 }
 
 // 1. FIRESTORE LISTENERS (Metadatos de conductores y pendientes)
@@ -350,6 +357,7 @@ function setupSocketListeners() {
     });
 
     socket.io?.on('reconnect_attempt', async () => {
+        updateConnectionStatus('reconnecting');
         if (auth && auth.currentUser) {
             const token = await auth.currentUser.getIdToken(true);
             if (socket) socket.auth = { token };
@@ -358,6 +366,7 @@ function setupSocketListeners() {
 
     socket.on('connect_error', async (err) => {
         console.warn("Socket connection error:", err.message);
+        updateConnectionStatus('reconnecting');
         if (err.message && err.message.includes("Unauthorized") && auth && auth.currentUser) {
             const token = await auth.currentUser.getIdToken(true);
             if (socket) {
@@ -366,9 +375,12 @@ function setupSocketListeners() {
         }
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
         state.connected = false;
-        updateConnectionStatus();
+        // Si el servidor desconectó, reconectar automáticamente
+        const autoReconnect = reason !== 'io client disconnect' && reason !== 'io server disconnect';
+        updateConnectionStatus(autoReconnect ? 'reconnecting' : 'disconnected');
+        console.warn('Socket desconectado, razón:', reason);
     });
 
     // Telemetría GPS en tiempo real
@@ -2524,17 +2536,24 @@ function startClock() {
     setInterval(update, 1000);
 }
 
-function updateConnectionStatus() {
+function updateConnectionStatus(state_override) {
     const statusEl = document.getElementById('connectionStatus');
     if (!statusEl) return;
     const dot = statusEl.querySelector('.status-dot');
     const text = statusEl.querySelector('span');
     if (dot && text) {
-        if (state.connected) {
+        const s = state_override || (state.connected ? 'connected' : 'disconnected');
+        if (s === 'connected') {
             dot.style.background = '#10b981';
+            dot.style.animation = '';
             text.textContent = 'Sistema Online';
+        } else if (s === 'reconnecting') {
+            dot.style.background = '#f59e0b';
+            dot.style.animation = 'pulse 1s infinite';
+            text.textContent = 'Reconectando...';
         } else {
             dot.style.background = '#ef4444';
+            dot.style.animation = '';
             text.textContent = 'Desconectado';
         }
     }

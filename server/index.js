@@ -100,10 +100,11 @@ async function verifyAuthToken(token) {
             else if (uidLower.startsWith('dispatcher')) role = 'dispatcher';
             else if (uidLower.startsWith('supervisor')) role = 'supervisor';
             else if (uidLower.startsWith('driver')) role = 'driver';
-            else if (decoded.email || decoded.firebase?.sign_in_provider === 'google.com' || decoded.firebase?.sign_in_provider === 'password') {
-              // Operadores autenticados con Google o Email en el panel de Central
+            else if (decoded.firebase?.sign_in_provider === 'google.com') {
+              // Solo Google OAuth → operadores web de la Central de Despacho
               role = 'dispatcher';
             } else {
+              // email/password y otros providers → conductores de la app móvil
               role = 'driver';
             }
           }

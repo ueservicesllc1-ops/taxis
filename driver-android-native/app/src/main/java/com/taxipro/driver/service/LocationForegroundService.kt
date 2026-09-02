@@ -99,6 +99,14 @@ class LocationForegroundService : Service() {
                     socket?.emit("register:driver", regObj)
                     Log.i(TAG, "Socket autenticado conectado y registrado a $serverUrl (UID: $uid)")
 
+                    // Señal explícita de disponibilidad online inmediata
+                    val availObj = JSONObject().apply {
+                        put("driverId", uid)
+                        put("userId", uid)
+                        put("available", true)
+                    }
+                    socket?.emit("driver:availability", availObj)
+
                     // Emitir de inmediato la última ubicación conocida para aparecer en el mapa de despacho
                     val lastLat = prefs.getFloat("last_driver_lat", 0f).toDouble()
                     val lastLng = prefs.getFloat("last_driver_lng", 0f).toDouble()
@@ -283,6 +291,16 @@ class LocationForegroundService : Service() {
                 "isOnline" to false
             )
         )
+        try {
+            val availObj = JSONObject().apply {
+                put("driverId", userId)
+                put("userId", userId)
+                put("available", false)
+            }
+            socket?.emit("driver:availability", availObj)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error emitting offline availability", e)
+        }
         socket?.disconnect()
     }
 

@@ -305,22 +305,25 @@ function setupFirestoreListeners() {
             if (data.status === 'pending') {
                 state.pendingDrivers.push(data);
             } else if (data.status === 'approved' || data.status === 'provisional_approved' || data.status === 'provisional' || data.provisionalApproved === true || data.isOnline === true || data.available === true) {
+                const isOnline = data.available === true || data.isOnline === true;
                 const existing = state.drivers.find(d => d.id === doc.id || d.driverId === doc.id || d.userId === doc.id);
                 if (existing) {
                     if (data.phone) existing.phone = data.phone;
                     if (data.vehicle) existing.vehicle = data.vehicle;
                     if (data.plate) existing.plate = data.plate;
                     if (data.name) existing.name = data.name;
-                    // Solo actualizar ubicación si no tenemos telemetría viva de socket reciente
-                    if (!existing.lastLocationAt && data.location && typeof data.location.lat === 'number') {
+                    existing.isOnline = isOnline;
+                    existing.available = data.available === true;
+                    existing.status = isOnline ? (data.available ? 'available' : 'busy') : 'offline';
+                    if (!existing.lastLocationAt && data.location && typeof data.location.lat === 'number' && data.location.lat !== 0) {
                         existing.location = data.location;
-                        updateDriverMarker(existing);
                     }
-                } else {
-                    const isOnline = data.available === true || data.isOnline === true;
+                    updateDriverMarker(existing);
+                } else if (isOnline) {
                     const driver = {
                         ...data,
                         isOnline,
+                        available: data.available === true,
                         status: isOnline ? (data.available ? 'available' : 'busy') : 'offline'
                     };
                     state.drivers.push(driver);
@@ -436,20 +439,23 @@ function setupSocketListeners() {
     });
 
     socket.on('driver:online', (driverData) => {
-        let driver = state.drivers.find(d => d.id === driverData.id || d.driverId === driverData.driverId);
+        const id = driverData.id || driverData.driverId || driverData.userId;
+        let driver = state.drivers.find(d => d.id === id || d.driverId === id || d.userId === id);
         if (driver) {
             Object.assign(driver, driverData);
             driver.isOnline = true;
-            driver.status = driverData.status || (driverData.available ? 'available' : 'busy');
+            driver.available = true;
+            driver.status = driverData.status || 'available';
             if (!driver.lastLocationAt) driver.lastLocationAt = Date.now();
         } else {
-            driver = { ...driverData, isOnline: true, lastLocationAt: Date.now() };
+            driver = { ...driverData, isOnline: true, available: true, status: driverData.status || 'available', lastLocationAt: Date.now() };
             state.drivers.push(driver);
         }
         updateDriverMarker(driver);
         renderDriversList();
         updateDriverSelectOptions();
         updateStats();
+        showToast('Taxista Conectado', `${driver.name} se ha conectado.`);
     });
 
     socket.on('driver:offline', (data) => {
@@ -461,7 +467,7 @@ function setupSocketListeners() {
             driver.available = false;
             driver.status = 'offline';
 
-            // Eliminar marcador del mapa
+            // Eliminar marcador del mapa inmediatamente
             const marker = state.markers.drivers.get(driver.id) || state.markers.drivers.get(offlineId);
             if (marker) {
                 marker.setMap(null);
@@ -469,10 +475,11 @@ function setupSocketListeners() {
                 state.markers.drivers.delete(offlineId);
             }
 
-            // Si no tiene carrera activa, eliminar de la lista; si tiene, dejarlo pero marcarlo offline
+            // Si no tiene carrera activa, eliminar de la lista de despacho
             if (!driver.currentRide && !driver.currentRideId) {
                 state.drivers.splice(driverIdx, 1);
             }
+            showToast('Taxista Desconectado', `${driver.name} se ha desconectado.`);
         }
         renderDriversList();
         updateDriverSelectOptions();
@@ -480,12 +487,26 @@ function setupSocketListeners() {
     });
 
     socket.on('driver:status_change', (data) => {
-        const driver = state.drivers.find(d => d.id === data.driverId || d.driverId === data.driverId);
+        const id = data.driverId || data.id;
+        const driver = state.drivers.find(d => d.id === id || d.driverId === id || d.userId === id);
         if (driver) {
             driver.status = data.status;
             driver.available = Boolean(data.available);
+            driver.isOnline = (data.status !== 'offline' && data.available !== false);
             if (data.currentRideId !== undefined) driver.currentRideId = data.currentRideId;
-            updateDriverMarker(driver);
+
+            if (!driver.isOnline && !driver.currentRide && !driver.currentRideId) {
+                const marker = state.markers.drivers.get(driver.id) || state.markers.drivers.get(id);
+                if (marker) {
+                    marker.setMap(null);
+                    state.markers.drivers.delete(driver.id);
+                    state.markers.drivers.delete(id);
+                }
+                const idx = state.drivers.indexOf(driver);
+                if (idx !== -1) state.drivers.splice(idx, 1);
+            } else {
+                updateDriverMarker(driver);
+            }
             renderDriversList();
             updateDriverSelectOptions();
             updateStats();
@@ -494,8 +515,11 @@ function setupSocketListeners() {
 
     socket.on('drivers:update', (driversList) => {
         if (Array.isArray(driversList)) {
+            const serverDriverKeys = new Set();
             driversList.forEach(d => {
-                const existing = state.drivers.find(x => x.id === d.id || x.driverId === d.driverId || (x.userId && (x.userId === d.userId || x.userId === d.driverId)));
+                const id = d.id || d.driverId || d.userId;
+                if (id) serverDriverKeys.add(id);
+                const existing = state.drivers.find(x => x.id === id || x.driverId === id || (x.userId && x.userId === id));
                 if (existing) {
                     const lastLoc = existing.lastLocationAt;
                     Object.assign(existing, d);
@@ -513,6 +537,22 @@ function setupSocketListeners() {
                     updateDriverMarker(newD);
                 }
             });
+
+            // Limpieza automática: Si el conductor ya no está en la lista del servidor y no tiene viaje, removerlo
+            for (let i = state.drivers.length - 1; i >= 0; i--) {
+                const localD = state.drivers[i];
+                const key = localD.id || localD.driverId || localD.userId;
+                if (!serverDriverKeys.has(key) && !localD.currentRide && !localD.currentRideId) {
+                    const marker = state.markers.drivers.get(key) || state.markers.drivers.get(localD.id);
+                    if (marker) {
+                        marker.setMap(null);
+                        state.markers.drivers.delete(key);
+                        state.markers.drivers.delete(localD.id);
+                    }
+                    state.drivers.splice(i, 1);
+                }
+            }
+
             renderDriversList();
             updateDriverSelectOptions();
             updateStats();

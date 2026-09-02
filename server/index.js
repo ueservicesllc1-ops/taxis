@@ -1093,26 +1093,32 @@ io.on('connection', (socket) => {
 
   socket.on('register:driver', (data) => {
     try {
-      const userRole = (socket.user?.role || '').toLowerCase();
-      const ALLOWED = ['driver', 'admin'];
-      if (!ALLOWED.includes(userRole)) {
-        logger.warn(`Intento no autorizado de registrarse como conductor: ${socket.user?.uid} con rol ${userRole}`);
-        socket.emit('error', { message: 'Acceso denegado: Se requiere rol de conductor.' });
-        return;
-      }
-
-      // Validación básica
-      if (!data.name || !data.vehicle || !data.plate) {
-        socket.emit('error', { message: 'Datos incompletos del conductor' });
-        return;
-      }
-
-      // Validar identidad criptográfica contra suplantación
       const authenticatedUid = socket.user?.uid;
+      if (!authenticatedUid) {
+        logger.warn(`Conexión sin UID intentó registrarse como conductor: ${socket.id}`);
+        socket.emit('error', { message: 'Acceso denegado: Usuario no autenticado.' });
+        return;
+      }
+
+      // Validar identidad contra suplantación
       if ((data.driverId && data.driverId !== authenticatedUid) || (data.userId && data.userId !== authenticatedUid)) {
-        logger.warn(`Intento de suplantación de identidad en register:driver: Socket ${socket.id} (${authenticatedUid}) intentó registrarse como ${data.driverId || data.userId}`);
+        logger.warn(`Intento de suplantación en register:driver: Socket ${socket.id} (${authenticatedUid}) intentó registrarse como ${data.driverId || data.userId}`);
         socket.emit('error', { message: 'Identidad no válida. driverId debe coincidir con el usuario autenticado.' });
         return;
+      }
+
+      // Normalización robusta de datos de conductor
+      const driverName = data.name || socket.user?.name || 'Socio Conductor';
+      let vehicleStr = 'Vehículo Taxi';
+      let plateStr = 'Placa Taxi';
+      if (typeof data.vehicle === 'string' && data.vehicle.trim()) {
+        vehicleStr = data.vehicle.trim();
+      } else if (data.vehicle && typeof data.vehicle === 'object') {
+        vehicleStr = `${data.vehicle.brand || ''} ${data.vehicle.model || ''}`.trim() || 'Vehículo Taxi';
+        plateStr = data.vehicle.plate || plateStr;
+      }
+      if (data.plate && typeof data.plate === 'string' && data.plate.trim()) {
+        plateStr = data.plate.trim();
       }
 
       const driverUid = authenticatedUid;
@@ -1138,29 +1144,42 @@ io.on('connection', (socket) => {
         socketId: socket.id,    // Socket actual (cambia en cada reconexión)
         driverId: driverUid,
         userId: driverUid,
-        name: data.name,
-        vehicle: data.vehicle,
-        plate: data.plate,
+        name: driverName,
+        vehicle: vehicleStr,
+        plate: plateStr,
+        phone: data.phone || socket.user?.phone || '',
         location: data.location || prevDriver?.location || { lat: 0, lng: 0 },
+        heading: data.heading || prevDriver?.heading || 0,
         available: existingActiveRide ? false : true,
         currentRide: existingActiveRide ? existingActiveRide.id : null,
         fcmToken,
         isOnline: true,
-        connectedAt: new Date()
+        status: existingActiveRide ? 'busy' : 'available',
+        connectedAt: new Date(),
+        lastUpdate: new Date()
       };
 
       // Unirse a la sala de UID permanente para garantizar que ride:new siempre llegue
       socket.join(driverUid);
 
-      // Indexar por UID estable (no por socket.id)
+      // Indexar por UID estable
       drivers.set(driverUid, driver);
 
       // Mantener también el mapeo socket → uid para el cleanup en disconnect
       socket._driverUid = driverUid;
 
-      logger.info(`Taxista conectado y autenticado: ${data.name} (Socket: ${socket.id}, UID: ${driverUid})${fcmToken ? ' [FCM Token OK]' : ''}${existingActiveRide ? ' [Recuperando carrera: ' + existingActiveRide.id + ']' : ''}`);
+      logger.info(`Taxista conectado y autenticado: ${driverName} (Socket: ${socket.id}, UID: ${driverUid})${fcmToken ? ' [FCM Token OK]' : ''}${existingActiveRide ? ' [Recuperando carrera: ' + existingActiveRide.id + ']' : ''}`);
       socket.emit('registered', { type: 'driver', id: driverUid, driver, uid: driverUid });
+
+      // Señal inmediata a la Central de Despacho
       io.emit('driver:online', driver);
+      io.emit('driver:status_change', {
+        driverId: driverUid,
+        id: driverUid,
+        status: driver.status,
+        available: driver.available,
+        isOnline: true
+      });
       io.emit('drivers:update', Array.from(drivers.values()));
 
       // Si tenía una carrera en curso, sincronizar y recuperarla de inmediato en el móvil
@@ -1237,33 +1256,49 @@ io.on('connection', (socket) => {
   // ============================================
   socket.on('driver:availability', (data) => {
     try {
-      const uid = socket._driverUid;
-      const driver = (uid && drivers.get(uid)) || drivers.get(socket.id);
+      const uid = socket._driverUid || data?.driverId || data?.userId || socket.user?.uid;
+      let driver = (uid && drivers.get(uid)) || drivers.get(socket.id);
+      const isAvail = Boolean(data?.available);
+
       if (driver) {
-        driver.available = Boolean(data.available);
-        driver.isOnline = Boolean(data.available);
-        if (data.location) {
+        driver.available = isAvail;
+        driver.isOnline = isAvail;
+        driver.status = isAvail ? 'available' : 'offline';
+        if (data?.location) {
           driver.location = data.location;
         }
+        driver.lastUpdate = new Date();
         const key = driver.id || uid;
-        drivers.set(key, driver);
 
-        logger.info(`Driver ${driver.name} is now ${driver.available ? 'AVAILABLE' : 'OFFLINE/BUSY'}`);
-
-        if (driver.available) {
+        if (isAvail) {
+          drivers.set(key, driver);
+          logger.info(`Taxista disponible y online: ${driver.name} (UID: ${key})`);
           io.emit('driver:online', driver);
           io.emit('driver:status_change', {
-            driverId: driver.id,
+            driverId: key,
+            id: key,
             status: 'available',
-            available: true
+            available: true,
+            isOnline: true
           });
         } else {
+          logger.info(`Taxista no disponible / desconectado: ${driver.name} (UID: ${key})`);
+          if (!driver.currentRide) {
+            drivers.delete(key);
+            if (drivers.has(socket.id)) drivers.delete(socket.id);
+          } else {
+            drivers.set(key, driver);
+          }
+          io.emit('driver:offline', { driverId: key, id: key });
           io.emit('driver:status_change', {
-            driverId: driver.id,
+            driverId: key,
+            id: key,
             status: 'offline',
-            available: false
+            available: false,
+            isOnline: false
           });
         }
+        io.emit('drivers:update', Array.from(drivers.values()));
       }
     } catch (error) {
       logger.error('Error updating driver availability:', error);
@@ -2326,11 +2361,13 @@ io.on('connection', (socket) => {
       const stableId = driver.id || driverUid;
 
       // Notificar desconexión en tiempo real a la Central Web
-      io.emit('driver:offline', { driverId: stableId });
+      io.emit('driver:offline', { driverId: stableId, id: stableId });
       io.emit('driver:status_change', {
         driverId: stableId,
+        id: stableId,
         status: 'offline',
-        available: false
+        available: false,
+        isOnline: false
       });
 
       // Si no tiene viaje activo en curso, eliminar del Map

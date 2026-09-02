@@ -220,15 +220,22 @@ function showPendingView() {
 function proceedToMainApp(driverData) {
     state.driver = driverData;
 
+    const plate = driverData.plate || (driverData.vehicle && typeof driverData.vehicle === 'object' ? driverData.vehicle.plate : 'Placa Taxi');
+    const vehicleStr = typeof driverData.vehicle === 'string' ? driverData.vehicle : `${driverData.vehicle?.brand || ''} ${driverData.vehicle?.model || ''}`.trim() || 'Vehículo Taxi';
+
     socket.emit('register:driver', {
         id: auth.currentUser.uid,
+        driverId: auth.currentUser.uid,
+        userId: auth.currentUser.uid,
         ...driverData,
+        vehicle: vehicleStr,
+        plate: plate,
         location: state.location || { lat: 0, lng: 0 }
     });
 
     elements.driverAvatarLarge.textContent = getInitials(driverData.name);
     elements.welcomeName.textContent = driverData.name;
-    elements.vehicleInfo.textContent = `${driverData.vehicle.brand} ${driverData.vehicle.model} - ${driverData.vehicle.plate}`;
+    elements.vehicleInfo.textContent = `${driverData.vehicle?.brand || ''} ${driverData.vehicle?.model || ''} - ${plate}`;
 
     elements.loginScreen.classList.add('hidden');
     elements.mainScreen.classList.remove('hidden');

@@ -30,6 +30,8 @@ let firebaseAuthAdmin = null;
 
 try {
   const admin = require('firebase-admin');
+  const { getAuth } = require('firebase-admin/auth');
+  const { getMessaging } = require('firebase-admin/messaging');
   let credential = null;
 
   if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
@@ -46,24 +48,30 @@ try {
   }
 
   const apps = admin.apps || (admin.default && admin.default.apps) || [];
-  if (!apps.length) {
+  let app = apps.length ? apps[0] : null;
+  if (!app) {
     if (credential) {
-      admin.initializeApp({
+      app = admin.initializeApp({
         credential,
         projectId: process.env.FIREBASE_PROJECT_ID || 'superprice-fa792'
       });
       logger.info('🔥 Firebase Admin SDK inicializado con credenciales de servicio.');
     } else {
-      admin.initializeApp({
+      app = admin.initializeApp({
         projectId: process.env.FIREBASE_PROJECT_ID || 'superprice-fa792'
       });
       logger.info('🔥 Firebase Admin SDK inicializado con Project ID.');
     }
   }
-  fcmMessaging = typeof admin.messaging === 'function' ? admin.messaging() : (admin.default && typeof admin.default.messaging === 'function' ? admin.default.messaging() : null);
-  firebaseAuthAdmin = typeof admin.auth === 'function' ? admin.auth() : (admin.default && typeof admin.default.auth === 'function' ? admin.default.auth() : null);
+
+  firebaseAuthAdmin = getAuth(app);
+  try {
+    fcmMessaging = getMessaging(app);
+  } catch (mErr) {
+    logger.warn('FCM Messaging no disponible sin service account completa:', mErr.message);
+  }
 } catch (err) {
-  logger.warn('Aviso: Firebase Admin SDK no configurado con Service Account completa (FCM y Auth funcionarán en modo seguro fallback): ' + err.message);
+  logger.warn('Aviso: Firebase Admin SDK no configurado: ' + err.message);
 }
 
 // ============================================

@@ -46,10 +46,14 @@
                     <div class="status-dot"></div>
                     <span>Conectado</span>
                 </div>
-                <div class="user-info">
+                <div class="user-info" style="display:flex; align-items:center; gap:6px;">
                     <span id="dispatcherName">Operador</span>
                     <span id="dispatcherRole" style="background:#2563eb; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; text-transform:uppercase;">DISPATCHER</span>
                     <div class="user-avatar" id="userAvatar">OP</div>
+                    <button id="btnLogout" class="btn-logout" title="Cerrar Sesión" style="background:#27272a; border:1px solid #3f3f46; color:#ef4444; padding:5px 9px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px; margin-left:4px; transition:all 0.2s;">
+                        <i data-lucide="log-out" style="width:14px; height:14px;"></i>
+                        <span>Salir</span>
+                    </button>
                 </div>
             </div>
         </header>

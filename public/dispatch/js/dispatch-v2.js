@@ -183,6 +183,24 @@ function setupAuth() {
         });
     }
 
+    const btnLogout = document.getElementById('btnLogout');
+    if (btnLogout) {
+        btnLogout.addEventListener('click', async () => {
+            try {
+                await signOut(auth);
+                state.drivers = [];
+                state.rides = [];
+                if (typeof renderDriversList === 'function') renderDriversList();
+                if (typeof renderJobsList === 'function') renderJobsList();
+                if (typeof updateStats === 'function') updateStats();
+                if (loginOverlay) loginOverlay.classList.remove('hidden');
+                console.log("Sesión cerrada por el operador.");
+            } catch (err) {
+                console.error("Error al cerrar sesión:", err);
+            }
+        });
+    }
+
     let firestoreStarted = false;
     onAuthStateChanged(auth, async (user) => {
         if (user && user.isAnonymous) {

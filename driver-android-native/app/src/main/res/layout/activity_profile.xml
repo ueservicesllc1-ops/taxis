@@ -300,11 +300,12 @@
                     android:orientation="horizontal">
 
                     <ImageView
+                        android:id="@+id/ivStatusSelfie"
                         android:layout_width="20dp"
                         android:layout_height="20dp"
-                        android:src="@drawable/ic_check_circle"
-                        app:tint="#22C55E"
-                        android:contentDescription="Ok" />
+                        android:src="@drawable/ic_activity"
+                        app:tint="#94A3B8"
+                        android:contentDescription="Selfie" />
 
                     <TextView
                         android:layout_width="0dp"
@@ -316,10 +317,11 @@
                         android:textSize="14sp" />
 
                     <TextView
+                        android:id="@+id/tvStatusSelfie"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Cargada"
-                        android:textColor="#22C55E"
+                        android:text="Pendiente"
+                        android:textColor="#94A3B8"
                         android:textSize="12sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -333,11 +335,12 @@
                     android:orientation="horizontal">
 
                     <ImageView
+                        android:id="@+id/ivStatusLicense"
                         android:layout_width="20dp"
                         android:layout_height="20dp"
-                        android:src="@drawable/ic_check_circle"
-                        app:tint="#22C55E"
-                        android:contentDescription="Ok" />
+                        android:src="@drawable/ic_activity"
+                        app:tint="#94A3B8"
+                        android:contentDescription="Licencia" />
 
                     <TextView
                         android:layout_width="0dp"
@@ -349,10 +352,11 @@
                         android:textSize="14sp" />
 
                     <TextView
+                        android:id="@+id/tvStatusLicense"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Cargada"
-                        android:textColor="#22C55E"
+                        android:text="Pendiente"
+                        android:textColor="#94A3B8"
                         android:textSize="12sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -366,11 +370,12 @@
                     android:orientation="horizontal">
 
                     <ImageView
+                        android:id="@+id/ivStatusInsurance"
                         android:layout_width="20dp"
                         android:layout_height="20dp"
-                        android:src="@drawable/ic_check_circle"
-                        app:tint="#22C55E"
-                        android:contentDescription="Ok" />
+                        android:src="@drawable/ic_activity"
+                        app:tint="#94A3B8"
+                        android:contentDescription="Seguro" />
 
                     <TextView
                         android:layout_width="0dp"
@@ -382,10 +387,11 @@
                         android:textSize="14sp" />
 
                     <TextView
+                        android:id="@+id/tvStatusInsurance"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Cargada"
-                        android:textColor="#22C55E"
+                        android:text="Pendiente"
+                        android:textColor="#94A3B8"
                         android:textSize="12sp"
                         android:textStyle="bold" />
                 </LinearLayout>
@@ -399,11 +405,12 @@
                     android:orientation="horizontal">
 
                     <ImageView
+                        android:id="@+id/ivStatusRegistration"
                         android:layout_width="20dp"
                         android:layout_height="20dp"
-                        android:src="@drawable/ic_check_circle"
-                        app:tint="#22C55E"
-                        android:contentDescription="Ok" />
+                        android:src="@drawable/ic_activity"
+                        app:tint="#94A3B8"
+                        android:contentDescription="Registro" />
 
                     <TextView
                         android:layout_width="0dp"
@@ -415,13 +422,25 @@
                         android:textSize="14sp" />
 
                     <TextView
+                        android:id="@+id/tvStatusRegistration"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Cargada"
-                        android:textColor="#22C55E"
+                        android:text="Pendiente"
+                        android:textColor="#94A3B8"
                         android:textSize="12sp"
                         android:textStyle="bold" />
                 </LinearLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnUploadMissingDocs"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="14dp"
+                    android:text="CARGAR O ACTUALIZAR DOCUMENTOS"
+                    android:textColor="#22C55E"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="#22C55E" />
 
             </LinearLayout>
         </androidx.cardview.widget.CardView>
